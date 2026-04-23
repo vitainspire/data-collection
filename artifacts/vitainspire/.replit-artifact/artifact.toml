@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/"
+title = "Vitainspire"
+version = "1.0.0"
+id = "artifacts/vitainspire"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/" ]
+localPort = 25751
+
+[services.development]
+run = "pnpm --filter @workspace/vitainspire run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/vitainspire", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/vitainspire", "run", "serve" ]
+
+[services.env]
+PORT = "25751"
+BASE_PATH = "/"

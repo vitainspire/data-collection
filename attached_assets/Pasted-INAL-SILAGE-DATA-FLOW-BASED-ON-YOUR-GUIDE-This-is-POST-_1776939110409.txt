@@ -1,0 +1,158 @@
+INAL SILAGE DATA FLOW (BASED ON YOUR GUIDE)
+
+This is POST-HARVEST ONLY (after fermentation 45+ days)
+
+Start → Sample → Label → Photos → pH → Assessment → Context → Grade → Submit
+🟡 PHASE: POST-HARVEST SILAGE COLLECTION (10 MIN FLOW)
+🧭 1️⃣ START SAMPLE
+[ Start Silage Sample ]
+
+Auto:
+
+Date
+GPS
+
+Select:
+
+Field (optional but recommended)
+⚠️ 2️⃣ ELIGIBILITY CHECK (VERY IMPORTANT)
+Is this silage?
+
+✔ 45+ days fermented  
+✔ Freshly opened OR feeding  
+
+❌ Reject if:
+- Fresh fodder  
+- <30 days  
+- Standing crop  
+
+👉 Button:
+
+[ Confirm Eligible ]
+🧺 3️⃣ SAMPLE COLLECTION (GUIDED)
+Instructions:
+
+1. Remove top 6 inches  
+2. Collect from 30–50 cm depth  
+3. Take ~1 kg sample  
+
+👉 Add reminder:
+
+Include some poor quality samples (20–30%)
+[ Sample Collected ]
+🏷 4️⃣ SAMPLE ID (AUTO + VISIBLE)
+Sample ID:
+AP-KNL-F001-20260423-S01
+
+👉 Instruction:
+
+Write ID on paper and include in first photo
+📸 5️⃣ PHOTO CAPTURE (STRICT – 4 REQUIRED)
+1️⃣ Context Photo
+7
+Full pit/bag view
+Distance: 1–2 meters
+Include ID tag
+2️⃣ Spread View (MOST IMPORTANT)
+Spread on white sheet
+Place 10₹ coin
+Top view (30–40 cm height)
+NO shadows
+3️⃣ Close-Up
+5
+4️⃣ Handful
+6
+
+✅ After capture:
+
+4/4 Photos Captured ✅
+🧪 6️⃣ pH TEST (GUIDED)
+Steps:
+1. Squeeze sample  
+2. Dip strip (2–3 sec)  
+3. Wait 30 sec  
+4. Match color  
+
+Input:
+
+pH:
+○ <4.2
+○ 4.2–4.8
+○ >4.8
+
+👉 No manual typing (avoid mistakes)
+
+👃 7️⃣ ASSESSMENT (TAP ONLY)
+Smell:
+○ Pleasant ○ Neutral ○ Foul
+
+Moisture:
+○ Optimal ○ Too Wet ○ Too Dry
+
+Mold:
+○ None ○ Surface ○ Deep
+
+Temperature:
+○ Cool ○ Warm ○ Hot
+📊 8️⃣ CONTEXT DATA
+Crop:
+○ Maize ○ Sorghum ○ Napier ○ Mixed
+
+Storage:
+○ Pit ○ Bag ○ Heap ○ Tower
+
+Age:
+○ 45–60 ○ 60–90 ○ 90+
+
+Weather (last week):
+○ Dry ○ Rainy ○ Hot
+
+Feeding Status:
+○ Feeding ○ Just Opened ○ Not Opened
+🧠 9️⃣ AUTO GRADE (RULE-BASED)
+
+System assigns:
+
+Grade A:
+pH <4.2 + no mold + pleasant smell
+
+Grade B:
+pH 4.2–4.8 + minor issues
+
+Grade C:
+pH >4.8 OR foul smell OR deep mold OR hot
+⚠️ 10️⃣ NEEDS REVIEW FLAG
+If uncertain → mark:
+[ Needs Review ]
+✅ 11️⃣ FINAL CHECKLIST
+✔ Sample ID visible
+✔ 4 photos captured
+✔ pH recorded
+✔ All fields filled
+✔ Grade assigned
+🚀 12️⃣ SUBMIT
+[ Submit Silage Data ]
+🔗 FINAL DATA STRUCTURE
+FIELD
+ └── SILAGE_SAMPLE
+       ├── sample_id
+       ├── photos (4 types)
+       ├── pH
+       ├── sensory
+       ├── context
+       ├── grade
+       ├── timestamp
+🧠 WHY THIS FLOW WORKS
+
+Because it follows:
+
+REAL ACTION → DATA ENTRY
+
+Not:
+
+FORM → THINK → CONFUSE
+⚠️ CRITICAL RULES YOU MUST ENFORCE
+4 photos = mandatory
+pH = mandatory
+ID must be visible in first photo
+No skipping steps

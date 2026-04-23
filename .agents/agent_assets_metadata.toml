@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "Oo4uh2FWBChMTXs8DCEmt"
+uri = "file://artifacts/vitainspire/assets/images/icon.png"
+type = "image"
+title = "vitainspire app icon"
