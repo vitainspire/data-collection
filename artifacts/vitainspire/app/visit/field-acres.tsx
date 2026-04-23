@@ -9,7 +9,7 @@ import {
   Platform,
   Modal,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
@@ -41,30 +41,8 @@ export default function FieldAcresScreen() {
   const router = useRouter();
   const { data, updateData } = useVisitContext();
 
-  const [walkerOpen, setWalkerOpen] = useState(false);
-  const [walkerPoints, setWalkerPoints] = useState<{ x: number; y: number }[]>([]);
   const [stateModalOpen, setStateModalOpen] = useState(false);
-
   const currentState = STATES.find((s) => s.code === data.state) || STATES[0];
-
-  const computeArea = () => {
-    if (walkerPoints.length < 3) return 0;
-    let area = 0;
-    for (let i = 0; i < walkerPoints.length; i++) {
-      const j = (i + 1) % walkerPoints.length;
-      area += walkerPoints[i].x * walkerPoints[j].y;
-      area -= walkerPoints[j].x * walkerPoints[i].y;
-    }
-    return Math.abs(area / 2 / 100).toFixed(2);
-  };
-
-  const finishWalker = () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const acres = computeArea();
-    updateData({ fieldArea: String(acres) });
-    setWalkerOpen(false);
-    setWalkerPoints([]);
-  };
 
   const canContinue = data.fieldArea.trim().length > 0 && parseFloat(data.fieldArea) > 0;
 
@@ -119,10 +97,7 @@ export default function FieldAcresScreen() {
           variant="outline"
           size="md"
           icon={<MaterialCommunityIcons name="walk" size={20} color={colors.primary} />}
-          onPress={() => {
-            setWalkerPoints([]);
-            setWalkerOpen(true);
-          }}
+          onPress={() => router.push("/visit/walker")}
           style={{ marginTop: 12 }}
         />
 
@@ -174,80 +149,6 @@ export default function FieldAcresScreen() {
           onPress={() => router.push("/visit/field-walk")}
         />
       </View>
-
-      {/* Acre Walker Modal */}
-      <Modal visible={walkerOpen} animationType="slide" transparent>
-        <View style={styles.modalBg}>
-          <View style={[styles.modal, { backgroundColor: colors.background }]}>
-            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Acre Walker</Text>
-            <Text style={[styles.modalSub, { color: colors.mutedForeground }]}>
-              Tap each corner of your field as you walk. Min 3 points.
-            </Text>
-
-            <TouchableOpacity
-              activeOpacity={0.9}
-              onPress={(e) => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                setWalkerPoints((p) => [
-                  ...p,
-                  { x: e.nativeEvent.locationX, y: e.nativeEvent.locationY },
-                ]);
-              }}
-              style={[
-                styles.walkerCanvas,
-                { backgroundColor: colors.secondary, borderColor: colors.border, borderRadius: colors.radius },
-              ]}
-            >
-              {walkerPoints.map((p, i) => (
-                <View
-                  key={i}
-                  style={[
-                    styles.point,
-                    { left: p.x - 8, top: p.y - 8, backgroundColor: colors.primary },
-                  ]}
-                >
-                  <Text style={styles.pointText}>{i + 1}</Text>
-                </View>
-              ))}
-              {walkerPoints.length === 0 && (
-                <View style={styles.canvasEmpty}>
-                  <MaterialCommunityIcons name="hand-pointing-up" size={32} color={colors.mutedForeground} />
-                  <Text style={{ color: colors.mutedForeground, fontWeight: "600", marginTop: 8 }}>
-                    Tap to log corners
-                  </Text>
-                </View>
-              )}
-            </TouchableOpacity>
-
-            <View style={styles.walkerStats}>
-              <Text style={[styles.statValue, { color: colors.primary }]}>
-                {walkerPoints.length}
-              </Text>
-              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>points</Text>
-              <View style={{ width: 1, height: 24, backgroundColor: colors.border, marginHorizontal: 16 }} />
-              <Text style={[styles.statValue, { color: colors.primary }]}>{computeArea()}</Text>
-              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>acres (est)</Text>
-            </View>
-
-            <View style={{ flexDirection: "row", gap: 10, marginTop: 16 }}>
-              <Button
-                title="Cancel"
-                variant="outline"
-                size="md"
-                onPress={() => setWalkerOpen(false)}
-                style={{ flex: 1 }}
-              />
-              <Button
-                title="Use Area"
-                size="md"
-                disabled={walkerPoints.length < 3}
-                onPress={finishWalker}
-                style={{ flex: 1 }}
-              />
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       {/* State / District Modal */}
       <Modal visible={stateModalOpen} animationType="slide" transparent>
