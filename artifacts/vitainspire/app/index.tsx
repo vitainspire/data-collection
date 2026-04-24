@@ -3,18 +3,21 @@ import { View, Text, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import Animated, { FadeIn, FadeOut, ZoomIn } from "react-native-reanimated";
 import { useColors } from "@/hooks/useColors";
+import { useStore } from "@/hooks/useStore";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 export default function SplashScreen() {
   const router = useRouter();
   const colors = useColors();
+  const { onboarded, loading } = useStore();
 
   useEffect(() => {
+    if (loading) return;
     const timer = setTimeout(() => {
-      router.replace("/(tabs)");
-    }, 2500);
+      router.replace(onboarded ? "/(tabs)" : "/onboarding");
+    }, 2200);
     return () => clearTimeout(timer);
-  }, [router]);
+  }, [router, onboarded, loading]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -30,25 +33,9 @@ export default function SplashScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  logoContainer: {
-    marginBottom: 24,
-  },
-  textContainer: {
-    alignItems: "center",
-    gap: 8,
-  },
-  title: {
-    fontSize: 42,
-    fontWeight: "800",
-    letterSpacing: -1,
-  },
-  tagline: {
-    fontSize: 18,
-    fontWeight: "600",
-  },
+  container: { flex: 1, alignItems: "center", justifyContent: "center" },
+  logoContainer: { marginBottom: 24 },
+  textContainer: { alignItems: "center", gap: 8 },
+  title: { fontSize: 42, fontWeight: "800", letterSpacing: -1 },
+  tagline: { fontSize: 18, fontWeight: "600" },
 });

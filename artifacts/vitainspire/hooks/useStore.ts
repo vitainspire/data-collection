@@ -3,92 +3,74 @@ import { useCallback, useEffect, useState } from "react";
 
 export interface Farmer {
   id: string;
-  photoUri: string;
+  name: string;
+  photoUri: string | null;
+  createdAt: string;
+}
+
+export type FieldStatus = "standing" | "cut" | "chopped" | "silage";
+
+export interface FieldCapture {
+  uri: string;
   capturedAt: string;
 }
 
-export interface FieldVisit {
+export interface SilageData {
+  ready: boolean;
+  photos: {
+    storage: string | null;
+    crossSection: string | null;
+    sample: string | null;
+    texture: string | null;
+  };
+  pH: string;
+  smell: string;
+  mold: string;
+  grade: "A" | "B" | "C" | "";
+  submittedAt: string;
+}
+
+export interface Field {
   id: string;
+  numericId: number;
   state: string;
   district: string;
-  fieldArea: string;
   cropType: string;
-  zones: {
-    A: ZoneData;
-    B: ZoneData;
-    C: ZoneData;
-  };
-  overallHealth: {
-    plantStand: string;
-    pestPressure: string;
-    diseaseSeen: string;
-    rainfallPattern: string;
-  };
-  photos: {
-    overview: string | null;
-    leaf: string | null;
-    cob: string | null;
-  };
+  area: string;
   createdAt: string;
-}
-
-export interface ZoneData {
-  plantPhoto: string | null;
-  cobPhoto: string | null;
-  plantHeight: string;
-  plantColor: string;
-  standDensity: string;
-}
-
-export interface SilageSample {
-  sampleId: string;
-  fieldId: string;
-  photos: [string | null, string | null, string | null, string | null];
-  pH: string;
-  sensory: {
-    smell: string;
-    moisture: string;
-    mold: string;
-    temperature: string;
+  status: FieldStatus;
+  standing: {
+    plantUri: string | null;
+    leafCobUri: string | null;
+    capturedAt: string;
   };
-  context: {
-    crop: string;
-    storage: string;
-    age: string;
-    weather: string;
-    feedingStatus: string;
-  };
-  grade: string;
-  needsReview: boolean;
-  gps: {
-    latitude: number;
-    longitude: number;
-  } | null;
-  createdAt: string;
+  cut: FieldCapture | null;
+  chopped: FieldCapture | null;
+  silage: SilageData | null;
 }
 
 const KEYS = {
-  FARMERS: "@vitainspire/farmers",
-  FIELD_VISITS: "@vitainspire/field_visits",
-  SILAGE_SAMPLES: "@vitainspire/silage_samples",
+  FARMER: "@vitainspire/farmer_v2",
+  FIELDS: "@vitainspire/fields_v2",
+  ONBOARDED: "@vitainspire/onboarded_v2",
 };
 
 export function useStore() {
-  const [farmers, setFarmers] = useState<Farmer[]>([]);
-  const [fieldVisits, setFieldVisits] = useState<FieldVisit[]>([]);
-  const [silageSamples, setSilageSamples] = useState<SilageSample[]>([]);
+  const [farmer, setFarmerState] = useState<Farmer | null>(null);
+  const [fields, setFields] = useState<Field[]>([]);
+  const [onboarded, setOnboardedState] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
     try {
-      const [f, fv, ss] = await Promise.all([
-        AsyncStorage.getItem(KEYS.FARMERS),
-        AsyncStorage.getItem(KEYS.FIELD_VISITS),
-        AsyncStorage.getItem(KEYS.SILAGE_SAMPLES),
+      const [f, fl, ob] = await Promise.all([
+        AsyncStorage.getItem(KEYS.FARMER),
+        AsyncStorage.getItem(KEYS.FIELDS),
+        AsyncStorage.getItem(KEYS.ONBOARDED),
       ]);
-      if (f) setFarmers(JSON.parse(f));
-      if (fv) setFieldVisits(JSON.parse(fv));
-      if (ss) setSilageSamples(JSON.parse(ss));
+      setFarmerState(f ? JSON.parse(f) : null);
+      setFields(fl ? JSON.parse(fl) : []);
+      setOnboardedState(ob === "true");
     } catch (e) {
       console.error("Failed to load store data", e);
     } finally {
@@ -100,32 +82,47 @@ export function useStore() {
     loadData();
   }, [loadData]);
 
-  const addFarmer = async (farmer: Farmer) => {
-    const updated = [...farmers, farmer];
-    setFarmers(updated);
-    await AsyncStorage.setItem(KEYS.FARMERS, JSON.stringify(updated));
+  const setFarmer = async (f: Farmer) => {
+    setFarmerState(f);
+    await AsyncStorage.setItem(KEYS.FARMER, JSON.stringify(f));
+    setOnboardedState(true);
+    await AsyncStorage.setItem(KEYS.ONBOARDED, "true");
   };
 
-  const addFieldVisit = async (visit: FieldVisit) => {
-    const updated = [visit, ...fieldVisits];
-    setFieldVisits(updated);
-    await AsyncStorage.setItem(KEYS.FIELD_VISITS, JSON.stringify(updated));
+  const addField = async (field: Field) => {
+    const updated = [field, ...fields];
+    setFields(updated);
+    await AsyncStorage.setItem(KEYS.FIELDS, JSON.stringify(updated));
   };
 
-  const addSilageSample = async (sample: SilageSample) => {
-    const updated = [sample, ...silageSamples];
-    setSilageSamples(updated);
-    await AsyncStorage.setItem(KEYS.SILAGE_SAMPLES, JSON.stringify(updated));
+  const updateField = async (id: string, patch: Partial<Field>) => {
+    const updated = fields.map((f) => (f.id === id ? { ...f, ...patch } : f));
+    setFields(updated);
+    await AsyncStorage.setItem(KEYS.FIELDS, JSON.stringify(updated));
+  };
+
+  const getNextNumericId = () => {
+    const max = fields.reduce((m, f) => (f.numericId > m ? f.numericId : m), 0);
+    return max + 1;
+  };
+
+  const reset = async () => {
+    await AsyncStorage.multiRemove([KEYS.FARMER, KEYS.FIELDS, KEYS.ONBOARDED]);
+    setFarmerState(null);
+    setFields([]);
+    setOnboardedState(false);
   };
 
   return {
-    farmers,
-    fieldVisits,
-    silageSamples,
+    farmer,
+    fields,
+    onboarded,
     loading,
-    addFarmer,
-    addFieldVisit,
-    addSilageSample,
+    setFarmer,
+    addField,
+    updateField,
+    getNextNumericId,
+    reset,
     refresh: loadData,
   };
 }

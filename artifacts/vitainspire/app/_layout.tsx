@@ -35,9 +35,9 @@ function RootLayoutNav() {
       }}
     >
       <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen name="onboarding" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="visit" options={{ headerShown: false }} />
-      <Stack.Screen name="silage" options={{ headerShown: false }} />
+      <Stack.Screen name="field" options={{ headerShown: false }} />
     </Stack>
   );
 }

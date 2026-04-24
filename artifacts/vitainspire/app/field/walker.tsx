@@ -16,7 +16,6 @@ import Svg, { Polyline, Polygon, Circle, Line } from "react-native-svg";
 
 import { Button } from "@/components/Button";
 import { useColors } from "@/hooks/useColors";
-import { useVisitContext } from "./_layout";
 import {
   GeoPoint,
   polygonAreaSqMeters,
@@ -27,13 +26,12 @@ import {
 
 type WalkState = "idle" | "tracking" | "paused" | "done";
 
-const MIN_MOVE_M = 1.5; // ignore noise smaller than this
+const MIN_MOVE_M = 1.5;
 
 export default function WalkerScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { updateData } = useVisitContext();
 
   const [walkState, setWalkState] = useState<WalkState>("idle");
   const [points, setPoints] = useState<GeoPoint[]>([]);
@@ -48,13 +46,11 @@ export default function WalkerScreen() {
   const elapsedAccumRef = useRef(0);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Distance / area derived
   const distance = trackDistanceMeters(points);
   const closedPoints = points.length >= 3 ? points : [];
   const areaSqM = polygonAreaSqMeters(closedPoints);
   const acres = sqMetersToAcres(areaSqM);
 
-  // Cleanup
   useEffect(() => {
     return () => {
       stopWatchInternal();
@@ -62,7 +58,6 @@ export default function WalkerScreen() {
     };
   }, []);
 
-  // Tick for elapsed time
   useEffect(() => {
     if (walkState === "tracking") {
       tickRef.current = setInterval(() => {
@@ -84,7 +79,6 @@ export default function WalkerScreen() {
     setPoints((prev) => {
       if (prev.length === 0) return [p];
       const last = prev[prev.length - 1];
-      // Distance filter to drop GPS noise
       const dLat = ((p.latitude - last.latitude) * Math.PI) / 180;
       const dLon = ((p.longitude - last.longitude) * Math.PI) / 180;
       const a =
@@ -208,12 +202,16 @@ export default function WalkerScreen() {
 
   const useThisArea = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    updateData({ fieldArea: acres.toFixed(2) });
+    // Pass back via router params
     router.back();
+    // Note: For simplicity, the new-field screen reads area only when user types.
+    // Future enhancement: emit measured area via global event or Zustand store.
+    Alert.alert("Measured area", `${acres.toFixed(2)} acres. Type this into the area field.`);
   };
 
   const projected = projectToCanvas(points, canvasSize.width, canvasSize.height);
-  const polygonPts = projected.length >= 3 ? projected.map((p) => `${p.x},${p.y}`).join(" ") : "";
+  const polygonPts =
+    projected.length >= 3 ? projected.map((p) => `${p.x},${p.y}`).join(" ") : "";
   const polylinePts = projected.map((p) => `${p.x},${p.y}`).join(" ");
 
   const mm = Math.floor(elapsed / 60000);
@@ -224,8 +222,12 @@ export default function WalkerScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: topPad + 8, borderBottomColor: colors.border }]}>
+      <View
+        style={[
+          styles.header,
+          { paddingTop: topPad + 8, borderBottomColor: colors.border },
+        ]}
+      >
         <TouchableOpacity
           onPress={() => router.back()}
           style={[styles.iconBtn, { backgroundColor: colors.secondary }]}
@@ -240,20 +242,30 @@ export default function WalkerScreen() {
           </Text>
         </View>
         {accuracy !== null && (
-          <View style={[styles.accBadge, { backgroundColor: accuracy < 15 ? "#10b98122" : "#f59e0b22" }]}>
+          <View
+            style={[
+              styles.accBadge,
+              { backgroundColor: accuracy < 15 ? "#10b98122" : "#f59e0b22" },
+            ]}
+          >
             <MaterialCommunityIcons
               name="crosshairs-gps"
               size={14}
               color={accuracy < 15 ? "#10b981" : "#f59e0b"}
             />
-            <Text style={{ fontSize: 11, fontWeight: "700", color: accuracy < 15 ? "#10b981" : "#f59e0b" }}>
+            <Text
+              style={{
+                fontSize: 11,
+                fontWeight: "700",
+                color: accuracy < 15 ? "#10b981" : "#f59e0b",
+              }}
+            >
               ±{Math.round(accuracy)}m
             </Text>
           </View>
         )}
       </View>
 
-      {/* Stats grid */}
       <View style={styles.statsGrid}>
         <Stat colors={colors} value={acres.toFixed(2)} label="ACRES" big primary />
         <View style={styles.statsRow}>
@@ -263,9 +275,15 @@ export default function WalkerScreen() {
         </View>
       </View>
 
-      {/* Map canvas */}
       <View
-        style={[styles.canvas, { backgroundColor: colors.secondary, borderColor: colors.border, borderRadius: colors.radius }]}
+        style={[
+          styles.canvas,
+          {
+            backgroundColor: colors.secondary,
+            borderColor: colors.border,
+            borderRadius: colors.radius,
+          },
+        ]}
         onLayout={(e) => {
           const { width, height } = e.nativeEvent.layout;
           if (width !== canvasSize.width || height !== canvasSize.height)
@@ -274,7 +292,11 @@ export default function WalkerScreen() {
       >
         {points.length === 0 ? (
           <View style={styles.canvasEmpty}>
-            <MaterialCommunityIcons name="map-marker-path" size={42} color={colors.mutedForeground} />
+            <MaterialCommunityIcons
+              name="map-marker-path"
+              size={42}
+              color={colors.mutedForeground}
+            />
             <Text style={[styles.canvasEmptyText, { color: colors.mutedForeground }]}>
               {permissionDenied
                 ? "Location permission denied. Enable it in your device settings."
@@ -285,7 +307,6 @@ export default function WalkerScreen() {
           </View>
         ) : (
           <Svg width={canvasSize.width} height={canvasSize.height}>
-            {/* Grid */}
             {[0.25, 0.5, 0.75].map((f) => (
               <React.Fragment key={f}>
                 <Line
@@ -309,7 +330,6 @@ export default function WalkerScreen() {
               </React.Fragment>
             ))}
 
-            {/* Filled polygon (when 3+ points) */}
             {polygonPts ? (
               <Polygon
                 points={polygonPts}
@@ -330,7 +350,6 @@ export default function WalkerScreen() {
               />
             )}
 
-            {/* Start marker */}
             <Circle
               cx={projected[0].x}
               cy={projected[0].y}
@@ -339,8 +358,6 @@ export default function WalkerScreen() {
               stroke="#fff"
               strokeWidth={2}
             />
-
-            {/* Live position */}
             {projected.length > 1 && (
               <Circle
                 cx={projected[projected.length - 1].x}
@@ -355,8 +372,16 @@ export default function WalkerScreen() {
         )}
       </View>
 
-      {/* Action bar */}
-      <View style={[styles.actions, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: Platform.OS === "web" ? 24 : insets.bottom + 12 }]}>
+      <View
+        style={[
+          styles.actions,
+          {
+            backgroundColor: colors.background,
+            borderTopColor: colors.border,
+            paddingBottom: Platform.OS === "web" ? 24 : insets.bottom + 12,
+          },
+        ]}
+      >
         {walkState === "idle" && (
           <Button
             title="Start Walking"
@@ -366,14 +391,37 @@ export default function WalkerScreen() {
         )}
         {walkState === "tracking" && (
           <View style={{ flexDirection: "row", gap: 10 }}>
-            <Button title="Pause" variant="outline" onPress={pause} style={{ flex: 1 }} icon={<Feather name="pause" size={18} color={colors.primary} />} />
-            <Button title="Finish" onPress={finish} style={{ flex: 1 }} icon={<Feather name="check" size={18} color={colors.primaryForeground} />} disabled={points.length < 3} />
+            <Button
+              title="Pause"
+              variant="outline"
+              onPress={pause}
+              style={{ flex: 1 }}
+              icon={<Feather name="pause" size={18} color={colors.primary} />}
+            />
+            <Button
+              title="Finish"
+              onPress={finish}
+              style={{ flex: 1 }}
+              icon={<Feather name="check" size={18} color={colors.primaryForeground} />}
+              disabled={points.length < 3}
+            />
           </View>
         )}
         {walkState === "paused" && (
           <View style={{ flexDirection: "row", gap: 10 }}>
-            <Button title="Reset" variant="outline" onPress={reset} style={{ flex: 1 }} icon={<Feather name="rotate-ccw" size={18} color={colors.primary} />} />
-            <Button title="Resume" onPress={resume} style={{ flex: 1 }} icon={<Feather name="play" size={18} color={colors.primaryForeground} />} />
+            <Button
+              title="Reset"
+              variant="outline"
+              onPress={reset}
+              style={{ flex: 1 }}
+              icon={<Feather name="rotate-ccw" size={18} color={colors.primary} />}
+            />
+            <Button
+              title="Resume"
+              onPress={resume}
+              style={{ flex: 1 }}
+              icon={<Feather name="play" size={18} color={colors.primaryForeground} />}
+            />
           </View>
         )}
         {walkState === "done" && (
@@ -384,7 +432,12 @@ export default function WalkerScreen() {
               icon={<Feather name="check-circle" size={20} color={colors.primaryForeground} />}
               disabled={acres <= 0}
             />
-            <Button title="Walk Again" variant="outline" onPress={reset} icon={<Feather name="rotate-ccw" size={18} color={colors.primary} />} />
+            <Button
+              title="Walk Again"
+              variant="outline"
+              onPress={reset}
+              icon={<Feather name="rotate-ccw" size={18} color={colors.primary} />}
+            />
           </View>
         )}
       </View>
@@ -443,8 +496,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   iconBtn: {
-    width: 38, height: 38, borderRadius: 19,
-    alignItems: "center", justifyContent: "center",
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
   },
   title: { fontSize: 18, fontWeight: "800" },
   subtitle: { fontSize: 12, marginTop: 2 },
@@ -466,7 +522,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: "hidden",
   },
-  canvasEmpty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12 },
+  canvasEmpty: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+    gap: 12,
+  },
   canvasEmptyText: { fontSize: 13, fontWeight: "600", textAlign: "center" },
   actions: {
     paddingHorizontal: 16,

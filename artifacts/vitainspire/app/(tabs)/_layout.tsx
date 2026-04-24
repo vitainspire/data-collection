@@ -24,24 +24,33 @@ export default function TabLayout() {
           paddingTop: 6,
         },
         tabBarLabelStyle: {
-          fontWeight: "600",
-          fontSize: 12,
+          fontWeight: "700",
+          fontSize: 11,
         },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
+          title: "Field Capture",
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="sprout" size={size + 2} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="harvest"
+        options={{
           title: "Harvest",
           tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="leaf" size={size + 2} color={color} />
+            <MaterialCommunityIcons name="leaf-maple" size={size + 2} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="post-harvest"
         options={{
-          title: "Post-Harvest",
+          title: "Post Harvest",
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="silo" size={size + 2} color={color} />
           ),
