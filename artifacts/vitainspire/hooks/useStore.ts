@@ -26,8 +26,20 @@ export interface SilageData {
   pH: string;
   smell: string;
   mold: string;
-  grade: "A" | "B" | "C" | "";
   submittedAt: string;
+}
+
+export type Irrigation = "Rainfed" | "Irrigated" | "Mixed" | "";
+
+export interface CropDetails {
+  variety: string;
+  sowingDate: string;
+  expectedHarvestDate: string;
+  irrigation: Irrigation;
+  plantHeightCm: string;
+  rowSpacingCm: string;
+  plantSpacingCm: string;
+  notes: string;
 }
 
 export interface FieldGPS {
@@ -46,6 +58,7 @@ export interface Field {
   district: string;
   districtName: string;
   cropType: string;
+  cropDetails: CropDetails;
   area: string;
   gps: FieldGPS | null;
   createdAt: string;

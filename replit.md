@@ -43,13 +43,22 @@ Smart farming data collection app — tagline "Smart Farming. Better Yield."
 
 ### Field lifecycle
 A single Field record progresses through statuses: `standing` → `cut` → `chopped` → `silage`. Each tab operates on the same Field:
-1. **Field Capture** creates the field with the standing photo
+1. **Field Capture** creates the field with location, GPS, full crop details, and the standing photo
 2. **Harvest** adds cut + chopped photos to a selected field
-3. **Post Harvest** runs the silage flow (ready check → 4 photos → pH/smell/mold → auto-grade A/B/C → submit) on a selected chopped field
+3. **Post Harvest** records silage observations (ready check → 4 photos → pH/smell/mold → submit) on a selected chopped field — pure data collection, **no automatic grading**
+
+### Field data collected
+Each Field captures: state code/name, district code/name, GPS (lat/lon/accuracy/altitude), area (acres), crop type (Maize/Sorghum/etc.), and `cropDetails`:
+- variety / hybrid name
+- sowing date + auto-computed days after sowing
+- expected harvest date
+- irrigation type (Rainfed / Irrigated / Mixed)
+- plant height (cm), row spacing (cm), plant spacing (cm)
+- free-text agronomic notes
 
 ### Conventions
 - No backend; all data persists via AsyncStorage (keys versioned `_v2`)
+- Pure data collection — no automatic grading, scoring, or recommendations are computed
 - No emojis — uses `@expo/vector-icons` (Feather + MaterialCommunityIcons)
 - Haptics on all selection interactions
 - Web safe-area inset minimum 67px top, 34px bottom
-- Auto-grade rules: A = pH<4.2 + no mold + pleasant; C = pH>4.8 OR foul OR deep mold; B otherwise

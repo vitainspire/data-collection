@@ -26,17 +26,6 @@ type Step = "select" | "ready-check" | "capture" | "data" | "submit" | "done";
 const SMELL_OPTIONS = ["Pleasant (lactic)", "Neutral", "Vinegar", "Sour/Foul"];
 const MOLD_OPTIONS = ["None", "Surface only", "Some pockets", "Deep mold"];
 
-function gradeFor(pH: string, smell: string, mold: string): "A" | "B" | "C" {
-  const ph = parseFloat(pH);
-  const foul = smell.toLowerCase().includes("foul") || smell.toLowerCase().includes("vinegar");
-  const deepMold = mold === "Deep mold" || mold === "Some pockets";
-  if (!Number.isNaN(ph) && ph > 4.8) return "C";
-  if (foul || mold === "Deep mold") return "C";
-  if (!Number.isNaN(ph) && ph < 4.2 && mold === "None" && smell.startsWith("Pleasant")) return "A";
-  if (deepMold) return "B";
-  return "B";
-}
-
 export default function PostHarvestTab() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -50,7 +39,6 @@ export default function PostHarvestTab() {
     pH: "",
     smell: "",
     mold: "",
-    grade: "",
     submittedAt: "",
   });
 
@@ -72,7 +60,6 @@ export default function PostHarvestTab() {
       pH: "",
       smell: "",
       mold: "",
-      grade: "",
       submittedAt: "",
     });
   };
@@ -109,10 +96,8 @@ export default function PostHarvestTab() {
   const submit = async () => {
     if (!selected) return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const grade = gradeFor(silage.pH, silage.smell, silage.mold);
     const data: SilageData = {
       ...silage,
-      grade,
       submittedAt: new Date().toISOString(),
     };
     await updateField(selected.id, { silage: data, status: "silage" });
@@ -173,9 +158,10 @@ export default function PostHarvestTab() {
                   </Text>
                 </View>
                 {f.silage?.submittedAt ? (
-                  <View style={[styles.gradePill, { backgroundColor: colors.primary }]}>
-                    <Text style={{ color: colors.primaryForeground, fontWeight: "800" }}>
-                      Grade {f.silage.grade}
+                  <View style={[styles.donePill, { backgroundColor: colors.primary }]}>
+                    <Feather name="check" size={14} color={colors.primaryForeground} />
+                    <Text style={{ color: colors.primaryForeground, fontWeight: "800", fontSize: 12 }}>
+                      Recorded
                     </Text>
                   </View>
                 ) : (
@@ -324,28 +310,12 @@ export default function PostHarvestTab() {
             ))}
           </View>
 
-          {dataComplete && (
-            <View
-              style={[
-                styles.gradePreview,
-                { backgroundColor: colors.secondary, borderRadius: colors.radius },
-              ]}
-            >
-              <Text style={[styles.gradeLabel, { color: colors.mutedForeground }]}>
-                AUTO GRADE
-              </Text>
-              <Text style={[styles.gradeBig, { color: colors.primary }]}>
-                {gradeFor(silage.pH, silage.smell, silage.mold)}
-              </Text>
-            </View>
-          )}
-
           <Button
             title="Submit"
             onPress={submit}
             disabled={!dataComplete}
             icon={<Feather name="check-circle" size={20} color={colors.primaryForeground} />}
-            style={{ marginTop: 18 }}
+            style={{ marginTop: 22 }}
           />
         </Animated.View>
       )}
@@ -363,16 +333,13 @@ export default function PostHarvestTab() {
               <Feather name="check" size={36} color={colors.primary} />
             </View>
             <Text style={[styles.doneTitle, { color: colors.primaryForeground }]}>
-              Silage Submitted
+              Silage Recorded
             </Text>
             <Text style={[styles.doneId, { color: colors.primaryForeground }]}>{selected.id}</Text>
-            <View style={styles.doneGradeBox}>
-              <Text style={{ color: colors.primaryForeground, opacity: 0.8, fontSize: 12, fontWeight: "700", letterSpacing: 1.4 }}>
-                GRADE
-              </Text>
-              <Text style={[styles.doneGrade, { color: colors.primaryForeground }]}>
-                {silage.grade}
-              </Text>
+            <View style={styles.doneSummaryBox}>
+              <DoneRow label="pH" value={silage.pH || "—"} colors={colors} />
+              <DoneRow label="Smell" value={silage.smell || "—"} colors={colors} />
+              <DoneRow label="Mold" value={silage.mold || "—"} colors={colors} />
             </View>
           </View>
           <Button
@@ -385,6 +352,23 @@ export default function PostHarvestTab() {
         </Animated.View>
       )}
     </ScrollView>
+  );
+}
+
+function DoneRow({
+  label,
+  value,
+  colors,
+}: {
+  label: string;
+  value: string;
+  colors: any;
+}) {
+  return (
+    <View style={styles.doneRow}>
+      <Text style={[styles.doneRowLabel, { color: colors.primaryForeground }]}>{label}</Text>
+      <Text style={[styles.doneRowValue, { color: colors.primaryForeground }]}>{value}</Text>
+    </View>
   );
 }
 
@@ -505,7 +489,14 @@ const styles = StyleSheet.create({
   },
   fieldId: { fontSize: 16, fontWeight: "800", letterSpacing: 0.3 },
   fieldMeta: { fontSize: 12, fontWeight: "500", marginTop: 2 },
-  gradePill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999 },
+  donePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
   questionCard: {
     padding: 22,
     borderWidth: 1,
@@ -529,13 +520,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   optGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  gradePreview: {
-    marginTop: 18,
-    padding: 18,
-    alignItems: "center",
-  },
-  gradeLabel: { fontSize: 11, fontWeight: "800", letterSpacing: 1.5 },
-  gradeBig: { fontSize: 56, fontWeight: "900", letterSpacing: -2, lineHeight: 64 },
   doneCard: { padding: 30, alignItems: "center", gap: 6, marginTop: 24 },
   doneIcon: {
     width: 72,
@@ -548,13 +532,19 @@ const styles = StyleSheet.create({
   },
   doneTitle: { fontSize: 20, fontWeight: "800" },
   doneId: { fontSize: 14, fontWeight: "700", opacity: 0.85, letterSpacing: 0.5 },
-  doneGradeBox: {
+  doneSummaryBox: {
     marginTop: 18,
-    padding: 18,
+    padding: 16,
     borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    alignItems: "center",
-    minWidth: 140,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignSelf: "stretch",
+    gap: 8,
   },
-  doneGrade: { fontSize: 56, fontWeight: "900", letterSpacing: -2, lineHeight: 64, marginTop: 4 },
+  doneRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  doneRowLabel: { fontSize: 12, fontWeight: "700", opacity: 0.8, letterSpacing: 0.8 },
+  doneRowValue: { fontSize: 14, fontWeight: "800", flex: 1, textAlign: "right", marginLeft: 12 },
 });

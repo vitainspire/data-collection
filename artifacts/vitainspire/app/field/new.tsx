@@ -18,12 +18,20 @@ import { Button } from "@/components/Button";
 import { CapturePhotoCard } from "@/components/CapturePhotoCard";
 import { LocationPicker } from "@/components/LocationPicker";
 import { useColors } from "@/hooks/useColors";
-import { useStore } from "@/hooks/useStore";
+import { useStore, type Irrigation } from "@/hooks/useStore";
 import { usePreciseLocation, formatLatLon } from "@/hooks/usePreciseLocation";
 import { makeFieldId } from "@/utils/idGenerator";
 import { INDIA_STATES, findState, findDistrict } from "@/data/indiaLocations";
 
 const CROPS = ["Maize", "Sorghum", "Bajra", "Wheat", "Rice", "Other"];
+const IRRIGATION_OPTIONS: Irrigation[] = ["Rainfed", "Irrigated", "Mixed"];
+
+function daysBetween(fromIso: string): number | null {
+  const d = new Date(fromIso);
+  if (isNaN(d.getTime())) return null;
+  const ms = Date.now() - d.getTime();
+  return Math.max(0, Math.floor(ms / (1000 * 60 * 60 * 24)));
+}
 
 export default function NewFieldScreen() {
   const colors = useColors();
@@ -46,6 +54,18 @@ export default function NewFieldScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [savedField, setSavedField] = useState<{ id: string } | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Crop details
+  const [variety, setVariety] = useState("");
+  const [sowingDate, setSowingDate] = useState("");
+  const [expectedHarvest, setExpectedHarvest] = useState("");
+  const [irrigation, setIrrigation] = useState<Irrigation>("");
+  const [plantHeight, setPlantHeight] = useState("");
+  const [rowSpacing, setRowSpacing] = useState("");
+  const [plantSpacing, setPlantSpacing] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const sowingDays = sowingDate ? daysBetween(sowingDate) : null;
 
   // Refresh from storage when this screen mounts (for area returned from walker)
   useFocusEffect(
@@ -79,6 +99,16 @@ export default function NewFieldScreen() {
       district: districtObj.code,
       districtName: districtObj.name,
       cropType: crop,
+      cropDetails: {
+        variety: variety.trim(),
+        sowingDate,
+        expectedHarvestDate: expectedHarvest,
+        irrigation,
+        plantHeightCm: plantHeight.trim(),
+        rowSpacingCm: rowSpacing.trim(),
+        plantSpacingCm: plantSpacing.trim(),
+        notes: notes.trim(),
+      },
       area,
       gps: gps
         ? {
@@ -318,6 +348,135 @@ export default function NewFieldScreen() {
           })}
         </View>
 
+        {/* CROP DETAILS */}
+        <Text style={[styles.label, { color: colors.foreground, marginTop: 22 }]}>
+          Variety / Hybrid — optional
+        </Text>
+        <TextInput
+          value={variety}
+          onChangeText={setVariety}
+          placeholder="e.g. DKC 9144, Pioneer 30V92"
+          placeholderTextColor={colors.mutedForeground}
+          style={[
+            styles.input,
+            {
+              color: colors.foreground,
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              borderRadius: colors.radius,
+            },
+          ]}
+        />
+
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 18 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.label, { color: colors.foreground }]}>Sowing date</Text>
+            <DateField
+              value={sowingDate}
+              onChange={setSowingDate}
+              colors={colors}
+            />
+            {sowingDays !== null && (
+              <Text style={[styles.helpText, { color: colors.mutedForeground }]}>
+                {sowingDays} day{sowingDays === 1 ? "" : "s"} after sowing
+              </Text>
+            )}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.label, { color: colors.foreground }]}>Expected harvest</Text>
+            <DateField
+              value={expectedHarvest}
+              onChange={setExpectedHarvest}
+              colors={colors}
+            />
+          </View>
+        </View>
+
+        <Text style={[styles.label, { color: colors.foreground, marginTop: 18 }]}>Irrigation</Text>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          {IRRIGATION_OPTIONS.map((o) => {
+            const sel = irrigation === o;
+            return (
+              <TouchableOpacity
+                key={o}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setIrrigation(sel ? "" : o);
+                }}
+                activeOpacity={0.85}
+                style={{
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  borderRadius: 999,
+                  borderWidth: 2,
+                  borderColor: sel ? colors.primary : colors.border,
+                  backgroundColor: sel ? colors.primary : colors.card,
+                }}
+              >
+                <Text
+                  style={{
+                    color: sel ? colors.primaryForeground : colors.foreground,
+                    fontWeight: "700",
+                    fontSize: 13,
+                  }}
+                >
+                  {o}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 18 }}>
+          <SmallNumberField
+            label="Plant height (cm)"
+            value={plantHeight}
+            onChange={setPlantHeight}
+            placeholder="e.g. 220"
+            colors={colors}
+          />
+          <SmallNumberField
+            label="Row spacing (cm)"
+            value={rowSpacing}
+            onChange={setRowSpacing}
+            placeholder="e.g. 60"
+            colors={colors}
+          />
+          <SmallNumberField
+            label="Plant spacing (cm)"
+            value={plantSpacing}
+            onChange={setPlantSpacing}
+            placeholder="e.g. 20"
+            colors={colors}
+          />
+        </View>
+
+        <Text style={[styles.label, { color: colors.foreground, marginTop: 18 }]}>
+          Notes — optional
+        </Text>
+        <TextInput
+          value={notes}
+          onChangeText={setNotes}
+          placeholder="Pests, fertilizer, weather, soil…"
+          placeholderTextColor={colors.mutedForeground}
+          multiline
+          numberOfLines={3}
+          style={[
+            styles.input,
+            {
+              color: colors.foreground,
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              borderRadius: colors.radius,
+              minHeight: 80,
+              textAlignVertical: "top",
+              paddingTop: 12,
+              fontSize: 14,
+              fontWeight: "500",
+            },
+          ]}
+        />
+
         <Text style={[styles.label, { color: colors.foreground, marginTop: 22 }]}>
           Field area (acres) — optional
         </Text>
@@ -389,6 +548,101 @@ export default function NewFieldScreen() {
           setStateCode(s.code);
           setDistrictCode(d.code);
         }}
+      />
+    </View>
+  );
+}
+
+function DateField({
+  value,
+  onChange,
+  colors,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  colors: any;
+}) {
+  // On web, render a native date input for a real picker; on native, plain text input.
+  if (Platform.OS === "web") {
+    return (
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      React.createElement("input" as any, {
+        type: "date",
+        value,
+        onChange: (e: any) => onChange(e.target.value),
+        style: {
+          borderWidth: 1,
+          borderStyle: "solid",
+          borderColor: colors.border,
+          backgroundColor: colors.card,
+          color: colors.foreground,
+          borderRadius: colors.radius,
+          paddingTop: 12,
+          paddingBottom: 12,
+          paddingLeft: 14,
+          paddingRight: 14,
+          fontSize: 15,
+          fontWeight: 700,
+          fontFamily: "inherit",
+          width: "100%",
+          boxSizing: "border-box",
+          outline: "none",
+        },
+      })
+    );
+  }
+  return (
+    <TextInput
+      value={value}
+      onChangeText={onChange}
+      placeholder="YYYY-MM-DD"
+      placeholderTextColor={colors.mutedForeground}
+      style={[
+        styles.input,
+        {
+          color: colors.foreground,
+          backgroundColor: colors.card,
+          borderColor: colors.border,
+          borderRadius: colors.radius,
+          fontSize: 15,
+        },
+      ]}
+    />
+  );
+}
+
+function SmallNumberField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  colors,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  colors: any;
+}) {
+  return (
+    <View style={{ flex: 1 }}>
+      <Text style={[styles.label, { color: colors.foreground }]}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        placeholder={placeholder}
+        placeholderTextColor={colors.mutedForeground}
+        keyboardType="decimal-pad"
+        style={[
+          styles.input,
+          {
+            color: colors.foreground,
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            borderRadius: colors.radius,
+            fontSize: 15,
+          },
+        ]}
       />
     </View>
   );
@@ -497,6 +751,7 @@ const styles = StyleSheet.create({
   },
   locName: { fontSize: 15, fontWeight: "700" },
   locId: { fontSize: 12, fontWeight: "500", marginTop: 2 },
+  helpText: { fontSize: 11, fontWeight: "600", marginTop: 6 },
   input: {
     borderWidth: 1,
     paddingHorizontal: 14,
