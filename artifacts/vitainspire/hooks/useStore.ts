@@ -30,13 +30,24 @@ export interface SilageData {
   submittedAt: string;
 }
 
+export interface FieldGPS {
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  altitude: number | null;
+  capturedAt: string;
+}
+
 export interface Field {
   id: string;
   numericId: number;
   state: string;
+  stateName: string;
   district: string;
+  districtName: string;
   cropType: string;
   area: string;
+  gps: FieldGPS | null;
   createdAt: string;
   status: FieldStatus;
   standing: {

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -7,7 +7,6 @@ import {
   TextInput,
   TouchableOpacity,
   Platform,
-  Modal,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,17 +16,12 @@ import Animated, { FadeIn } from "react-native-reanimated";
 
 import { Button } from "@/components/Button";
 import { CapturePhotoCard } from "@/components/CapturePhotoCard";
+import { LocationPicker } from "@/components/LocationPicker";
 import { useColors } from "@/hooks/useColors";
 import { useStore } from "@/hooks/useStore";
-import { makeFieldId, uniqueId } from "@/utils/idGenerator";
-
-const STATES = [
-  { code: "AP", name: "Andhra Pradesh", districts: ["KNL", "GTR", "ATP", "VSK"] },
-  { code: "TS", name: "Telangana", districts: ["HYD", "WGL", "NZB", "KMM"] },
-  { code: "KA", name: "Karnataka", districts: ["BLR", "MYS", "BLM", "DVG"] },
-  { code: "TN", name: "Tamil Nadu", districts: ["CHE", "CBE", "MDU", "TIR"] },
-  { code: "MH", name: "Maharashtra", districts: ["PUN", "NSK", "AUR", "NGP"] },
-];
+import { usePreciseLocation, formatLatLon } from "@/hooks/usePreciseLocation";
+import { makeFieldId } from "@/utils/idGenerator";
+import { INDIA_STATES, findState, findDistrict } from "@/data/indiaLocations";
 
 const CROPS = ["Maize", "Sorghum", "Bajra", "Wheat", "Rice", "Other"];
 
@@ -35,15 +29,21 @@ export default function NewFieldScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { fields, addField, getNextNumericId, refresh } = useStore();
+  const { addField, getNextNumericId, refresh } = useStore();
+  const { gps, status: gpsStatus, error: gpsError, start: startGps } = usePreciseLocation();
 
-  const [state, setState] = useState("AP");
-  const [district, setDistrict] = useState("KNL");
+  // Default to Andhra Pradesh / Kurnool (which exists in the new dataset)
+  const [stateCode, setStateCode] = useState("AP");
+  const [districtCode, setDistrictCode] = useState(() => {
+    const ap = findState("AP");
+    const knl = ap?.districts.find((d) => d.name === "Kurnool");
+    return knl?.code ?? ap?.districts[0]?.code ?? "ATP";
+  });
   const [crop, setCrop] = useState("Maize");
   const [area, setArea] = useState("");
   const [plantUri, setPlantUri] = useState<string | null>(null);
   const [leafCobUri, setLeafCobUri] = useState<string | null>(null);
-  const [stateModalOpen, setStateModalOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [savedField, setSavedField] = useState<{ id: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -54,7 +54,14 @@ export default function NewFieldScreen() {
     }, [refresh])
   );
 
-  const stateObj = STATES.find((s) => s.code === state) || STATES[0];
+  // Kick off GPS on mount
+  useEffect(() => {
+    startGps();
+  }, [startGps]);
+
+  const stateObj = findState(stateCode) ?? INDIA_STATES[0];
+  const districtObj =
+    findDistrict(stateCode, districtCode) ?? stateObj.districts[0];
 
   const canSave = !!plantUri && !!crop;
 
@@ -63,14 +70,25 @@ export default function NewFieldScreen() {
     setSaving(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const numericId = getNextNumericId();
-    const id = makeFieldId(state, district, numericId);
+    const id = makeFieldId(stateCode, districtObj.code, numericId);
     await addField({
       id,
       numericId,
-      state,
-      district,
+      state: stateCode,
+      stateName: stateObj.name,
+      district: districtObj.code,
+      districtName: districtObj.name,
       cropType: crop,
       area,
+      gps: gps
+        ? {
+            latitude: gps.latitude,
+            longitude: gps.longitude,
+            accuracy: gps.accuracy,
+            altitude: gps.altitude,
+            capturedAt: gps.capturedAt,
+          }
+        : null,
       createdAt: new Date().toISOString(),
       status: "standing",
       standing: {
@@ -121,6 +139,14 @@ export default function NewFieldScreen() {
             <Text style={[styles.successSub, { color: colors.primaryForeground, opacity: 0.85 }]}>
               {crop} · {area || "—"} acres
             </Text>
+            <Text style={[styles.successSub, { color: colors.primaryForeground, opacity: 0.75, marginTop: 2 }]}>
+              {stateObj.name} · {districtObj.name}
+            </Text>
+            {gps && (
+              <Text style={[styles.successSub, { color: colors.primaryForeground, opacity: 0.75, marginTop: 2 }]}>
+                {formatLatLon(gps)}
+              </Text>
+            )}
           </Animated.View>
 
           <Text style={[styles.sectionTitle, { color: colors.foreground, marginTop: 28 }]}>
@@ -169,7 +195,10 @@ export default function NewFieldScreen() {
       >
         <Text style={[styles.label, { color: colors.foreground }]}>Location</Text>
         <TouchableOpacity
-          onPress={() => setStateModalOpen(true)}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            setPickerOpen(true);
+          }}
           activeOpacity={0.85}
           style={[
             styles.locationBtn,
@@ -180,15 +209,79 @@ export default function NewFieldScreen() {
             <MaterialCommunityIcons name="map-marker" size={20} color={colors.primary} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.locName, { color: colors.foreground }]}>
-              {stateObj.name} · {district}
+            <Text style={[styles.locName, { color: colors.foreground }]} numberOfLines={1}>
+              {stateObj.name} · {districtObj.name}
             </Text>
             <Text style={[styles.locId, { color: colors.mutedForeground }]}>
-              ID prefix: {state}-{district}
+              ID prefix: {stateCode}-{districtObj.code}
             </Text>
           </View>
           <Feather name="chevron-down" size={18} color={colors.foreground} />
         </TouchableOpacity>
+
+        {/* Precise GPS card */}
+        <View
+          style={[
+            styles.gpsCard,
+            { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius },
+          ]}
+        >
+          <View style={[styles.iconCircle, { backgroundColor: colors.secondary }]}>
+            <MaterialCommunityIcons name="crosshairs-gps" size={20} color={colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            {gps ? (
+              <>
+                <Text style={[styles.locName, { color: colors.foreground }]} numberOfLines={1}>
+                  {formatLatLon(gps)}
+                </Text>
+                <Text style={[styles.locId, { color: colors.mutedForeground }]}>
+                  Accuracy ±{gps.accuracy != null ? Math.round(gps.accuracy) : "?"} m
+                  {gps.altitude != null ? ` · alt ${Math.round(gps.altitude)} m` : ""}
+                </Text>
+              </>
+            ) : gpsStatus === "requesting" ? (
+              <>
+                <Text style={[styles.locName, { color: colors.foreground }]}>Locating…</Text>
+                <Text style={[styles.locId, { color: colors.mutedForeground }]}>
+                  Waiting for GPS fix
+                </Text>
+              </>
+            ) : gpsStatus === "denied" ? (
+              <>
+                <Text style={[styles.locName, { color: colors.foreground }]}>
+                  Permission needed
+                </Text>
+                <Text style={[styles.locId, { color: colors.mutedForeground }]}>
+                  Tap retry and allow access
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={[styles.locName, { color: colors.foreground }]}>
+                  GPS not available
+                </Text>
+                <Text style={[styles.locId, { color: colors.mutedForeground }]}>
+                  {gpsError ?? "Tap retry to try again"}
+                </Text>
+              </>
+            )}
+          </View>
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              startGps();
+            }}
+            style={[styles.refreshBtn, { backgroundColor: colors.secondary }]}
+            activeOpacity={0.7}
+          >
+            <Feather
+              name="refresh-cw"
+              size={16}
+              color={colors.primary}
+            />
+          </TouchableOpacity>
+        </View>
 
         <Text style={[styles.label, { color: colors.foreground, marginTop: 22 }]}>Crop</Text>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
@@ -287,55 +380,16 @@ export default function NewFieldScreen() {
         />
       </ScrollView>
 
-      <Modal visible={stateModalOpen} animationType="slide" transparent>
-        <View style={styles.modalBg}>
-          <View style={[styles.modal, { backgroundColor: colors.background }]}>
-            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Select Location</Text>
-            <ScrollView style={{ maxHeight: 480 }} showsVerticalScrollIndicator={false}>
-              {STATES.map((s) => (
-                <View key={s.code} style={{ marginBottom: 14 }}>
-                  <Text style={[styles.stateName, { color: colors.foreground }]}>{s.name}</Text>
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                    {s.districts.map((d) => {
-                      const sel = state === s.code && district === d;
-                      return (
-                        <TouchableOpacity
-                          key={d}
-                          onPress={() => {
-                            Haptics.selectionAsync();
-                            setState(s.code);
-                            setDistrict(d);
-                          }}
-                          activeOpacity={0.85}
-                          style={{
-                            paddingHorizontal: 12,
-                            paddingVertical: 8,
-                            borderRadius: 999,
-                            borderWidth: 2,
-                            borderColor: sel ? colors.primary : colors.border,
-                            backgroundColor: sel ? colors.primary : colors.card,
-                          }}
-                        >
-                          <Text
-                            style={{
-                              color: sel ? colors.primaryForeground : colors.foreground,
-                              fontWeight: "700",
-                              fontSize: 13,
-                            }}
-                          >
-                            {s.code}-{d}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
-            <Button title="Done" onPress={() => setStateModalOpen(false)} style={{ marginTop: 8 }} />
-          </View>
-        </View>
-      </Modal>
+      <LocationPicker
+        visible={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        selectedState={stateCode}
+        selectedDistrict={districtCode}
+        onSelect={(s, d) => {
+          setStateCode(s.code);
+          setDistrictCode(d.code);
+        }}
+      />
     </View>
   );
 }
@@ -419,6 +473,21 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
   },
+  gpsCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 14,
+    borderWidth: 1,
+    marginTop: 10,
+  },
+  refreshBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   iconCircle: {
     width: 36,
     height: 36,
@@ -443,10 +512,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderWidth: 2,
   },
-  modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  modal: { padding: 20, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
-  modalTitle: { fontSize: 20, fontWeight: "800", marginBottom: 16 },
-  stateName: { fontSize: 13, fontWeight: "700", marginBottom: 8 },
   successCard: { padding: 30, alignItems: "center", gap: 4 },
   successIcon: {
     width: 72,
