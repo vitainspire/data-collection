@@ -88,18 +88,27 @@ export async function uploadPhoto(
     const ext = mimeType === "image/png" ? "png" : "jpg";
     const fullName = `${fileName}.${ext}`;
 
+    console.log("[driveUpload] uploading:", fullName, "url:", GAS_URL.slice(0, 60));
+
     const res = await fetch(GAS_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      // text/plain avoids CORS preflight — GAS parses e.postData.contents regardless
+      headers: { "Content-Type": "text/plain" },
       body: JSON.stringify({ base64, fileName: fullName, mimeType, folderId: FOLDER_ID, metadata }),
     });
 
-    const json: UploadResult = await res.json();
-    if (json.status !== "success") console.warn("[driveUpload] upload failed:", fileName, json);
-    else console.log("[driveUpload] uploaded:", json.url);
+    const text = await res.text();
+    console.log("[driveUpload] raw response:", text.slice(0, 200));
+
+    let json: UploadResult;
+    try { json = JSON.parse(text); }
+    catch { return { status: "error", message: "Non-JSON response: " + text.slice(0, 100) }; }
+
+    if (json.status !== "success") console.warn("[driveUpload] failed:", fileName, json);
+    else console.log("[driveUpload] ✅ uploaded:", json.url);
     return json;
   } catch (err: any) {
-    console.warn("[driveUpload] error:", fileName, err?.message ?? String(err));
+    console.warn("[driveUpload] fetch error:", fileName, err?.message ?? String(err));
     return { status: "error", message: err?.message ?? String(err) };
   }
 }
