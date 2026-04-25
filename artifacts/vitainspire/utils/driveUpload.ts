@@ -18,7 +18,6 @@ import type {
 } from "@/hooks/useStore";
 
 const GAS_URL = process.env.EXPO_PUBLIC_GAS_BRIDGE_URL ?? "";
-const FOLDER_ID = process.env.EXPO_PUBLIC_DRIVE_FOLDER_ID ?? "";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -75,8 +74,7 @@ export interface UploadResult {
 export async function uploadPhoto(
   uri: string,
   fileName: string,
-  mimeType = "image/jpeg",
-  metadata: Record<string, string> = {}
+  mimeType = "image/jpeg"
 ): Promise<UploadResult> {
   if (!GAS_URL) {
     console.warn("[driveUpload] EXPO_PUBLIC_GAS_BRIDGE_URL is not set.");
@@ -94,7 +92,7 @@ export async function uploadPhoto(
       method: "POST",
       // text/plain avoids CORS preflight — GAS parses e.postData.contents regardless
       headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ base64, fileName: fullName, mimeType, folderId: FOLDER_ID, metadata }),
+      body: JSON.stringify({ base64, fileName: fullName, mimeType }),
     });
 
     const text = await res.text();
@@ -158,7 +156,7 @@ export function standingLeafCobFileName(field: Field): string {
 export function zonePhotoFileName(
   field: Field,
   zone: "A" | "B" | "C",
-  photoType: "plant" | "cob",
+  photoType: "plant" | "leaf" | "cob",
   zoneData: ZoneData,
   capturedAt: string
 ): string {
@@ -183,16 +181,17 @@ export function zonePhotoFileName(
 
 /**
  * Cut (harvest) photo
- * Pattern: <fieldId>_<crop>_cut_yield-<yield>_moist-<moisture>_stubble-<stubble>_<capturedBy>_<date>
+ * Pattern: <fieldId>_<crop>_cut_<harvestMethod>_<cropCondition>_<capturedBy>_<date>
  */
 export function cutPhotoFileName(
   field: Field,
   obs: CutObservation
 ): string {
   const attrs = [
-    obs.yieldEstimate ? `yield-${safe(obs.yieldEstimate)}` : null,
-    obs.moistureAtCut ? `moist-${safe(obs.moistureAtCut)}` : null,
-    obs.stubbleHeight ? `stubble-${safe(obs.stubbleHeight)}` : null,
+    obs.harvestMethod ? `method-${safe(obs.harvestMethod)}` : null,
+    obs.cropCondition ? `cond-${safe(obs.cropCondition)}` : null,
+    obs.cuttingHeight ? `ht-${safe(obs.cuttingHeight)}` : null,
+    obs.lodging       ? `lodge-${safe(obs.lodging)}` : null,
   ]
     .filter(Boolean)
     .join("_");
@@ -313,6 +312,12 @@ export async function uploadFieldPhotos(
           zonePhotoFileName(field, zone, "plant", z, at)
         );
       }
+      if (z.leafUri) {
+        results[`zones.${zone}.leafUri`] = await tryUpload(
+          z.leafUri,
+          zonePhotoFileName(field, zone, "leaf", z, at)
+        );
+      }
       if (z.cobUri) {
         results[`zones.${zone}.cobUri`] = await tryUpload(
           z.cobUri,
@@ -350,7 +355,7 @@ export async function uploadFieldPhotos(
     for (const [uri, type] of slots) {
       if (uri) {
         const name = silagePhotoFileName(s, type);
-        const r = await uploadPhoto(uri, name, "image/jpeg", { fieldId: field.id });
+        const r = await uploadPhoto(uri, name);
         results[`silage.photos.${type}`] = r.status === "success" ? (r.url ?? null) : null;
       }
     }

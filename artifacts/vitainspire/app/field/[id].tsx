@@ -1,6 +1,6 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Alert,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform,
 } from "react-native";
 import { useLocalSearchParams, useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,8 +12,6 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import { useColors } from "@/hooks/useColors";
 import { useStore, type Field, type FieldStatus } from "@/hooks/useStore";
 import { Button } from "@/components/Button";
-import { uploadFieldPhotos } from "@/utils/driveUpload";
-import { syncFieldToSheet, syncZonesToSheet, syncCutToSheet, syncChoppedToSheet } from "@/utils/sheetSync";
 
 interface StageConfig {
   key: FieldStatus;
@@ -77,7 +75,6 @@ export default function FieldDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { fields, refresh } = useStore();
-  const [syncing, setSyncing] = useState(false);
 
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
 
@@ -112,36 +109,6 @@ export default function FieldDetailScreen() {
     // nextRoute points to the capture screen for what comes after it.
     const currentStage = STAGES[currentStageIdx];
     if (currentStage) router.push(currentStage.nextRoute(field.id) as any);
-  };
-
-  const manualSync = async () => {
-    if (!field) return;
-    setSyncing(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    try {
-      const gasUrl = process.env.EXPO_PUBLIC_GAS_BRIDGE_URL ?? "";
-      const sheetUrl = process.env.EXPO_PUBLIC_SHEET_BRIDGE_URL ?? "";
-      if (!gasUrl) { Alert.alert("Config missing", "EXPO_PUBLIC_GAS_BRIDGE_URL is not set in environment."); setSyncing(false); return; }
-
-      syncFieldToSheet(field);
-      if (field.zones) syncZonesToSheet(field);
-      if (field.cut) syncCutToSheet(field);
-      if (field.chopped) syncChoppedToSheet(field);
-
-      const results = await uploadFieldPhotos(field);
-      const uploaded = Object.values(results).filter(Boolean).length;
-      const total = Object.keys(results).length;
-      Alert.alert(
-        uploaded > 0 ? "✅ Sync complete" : total === 0 ? "No photos to upload" : "⚠️ Upload issues",
-        total === 0
-          ? "No photos found on this field yet."
-          : `${uploaded}/${total} photos uploaded to Drive.\n\nSheet sync sent.\n\nDrive URL: ${gasUrl.slice(0, 50)}...`
-      );
-    } catch (e: any) {
-      Alert.alert("Sync failed", e?.message ?? String(e));
-    } finally {
-      setSyncing(false);
-    }
   };
 
   const stageIsDone = (s: StageConfig) => {
@@ -283,32 +250,23 @@ export default function FieldDetailScreen() {
       </ScrollView>
 
       {/* Bottom action */}
-      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12, borderTopColor: colors.border, backgroundColor: colors.background }]}>
-        {!isComplete && (
-          field.status === "standing" && !field.zones?.A?.plantUri ? (
+      {!isComplete && (
+        <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12, borderTopColor: colors.border, backgroundColor: colors.background }]}>
+          {field.status === "standing" && !field.zones?.A?.plantUri ? (
             <Button title="Capture Zone Sampling" onPress={captureNext} icon={<Feather name="camera" size={20} color={colors.primaryForeground} />} />
           ) : nextStage ? (
             <Button title={`Capture Next: ${nextStage.label}`} onPress={captureNext} icon={<Feather name="arrow-right" size={20} color={colors.primaryForeground} />} />
-          ) : null
-        )}
-        {isComplete && (
+          ) : null}
+        </View>
+      )}
+      {isComplete && (
+        <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12, borderTopColor: colors.border, backgroundColor: colors.background }]}>
           <View style={[styles.completeBanner, { backgroundColor: "#16a34a22", borderRadius: colors.radius }]}>
             <Feather name="check-circle" size={20} color="#15803d" />
             <Text style={{ color: "#15803d", fontWeight: "800", fontSize: 15 }}>All stages complete</Text>
           </View>
-        )}
-        <TouchableOpacity
-          onPress={manualSync}
-          disabled={syncing}
-          activeOpacity={0.75}
-          style={[styles.syncBtn, { borderColor: colors.border, opacity: syncing ? 0.5 : 1 }]}
-        >
-          <Feather name={syncing ? "loader" : "upload-cloud"} size={15} color={colors.mutedForeground} />
-          <Text style={[styles.syncText, { color: colors.mutedForeground }]}>
-            {syncing ? "Syncing…" : "Sync to Drive & Sheets"}
-          </Text>
-        </TouchableOpacity>
-      </View>
+        </View>
+      )}
     </View>
   );
 }
