@@ -41,7 +41,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow Vitainspire to use your location for accurate field mapping."
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,

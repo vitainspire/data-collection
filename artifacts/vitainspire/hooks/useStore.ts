@@ -10,12 +10,50 @@ export interface Farmer {
 
 export type FieldStatus = "standing" | "cut" | "chopped" | "silage";
 
+// Every capture records who did it and when
 export interface FieldCapture {
   uri: string;
   capturedAt: string;
+  capturedBy: string;
+}
+
+export interface ZoneData {
+  plantUri: string | null;
+  leafUri: string | null;
+  cobUri: string | null;
+  plantHeight: "Tall" | "Medium" | "Short" | "";
+  plantColor: "Dark" | "Medium" | "Pale" | "";
+  standDensity: "Dense" | "Medium" | "Sparse" | "";
+}
+
+export interface FieldVisit {
+  visitId: string;
+  createdAt: string;
+  state: string;
+  stateName: string;
+  district: string;
+  districtName: string;
+  areaAcres: string;
+  cropType: string;
+  zones: { A: ZoneData; B: ZoneData; C: ZoneData };
+  fieldHealth: {
+    plantStand: "Good" | "Medium" | "Poor" | "";
+    pestPressure: "None" | "Mild" | "Severe" | "";
+    diseaseSeen: "Yes" | "No" | "";
+    rainfallPattern: "Adequate" | "Low" | "Excess" | "";
+  };
+  fieldPhotos: {
+    overview: string | null;
+    leaf: string | null;
+    cob: string | null;
+  };
+  savedAt: string;
 }
 
 export interface SilageData {
+  sampleId: string;
+  gps: { latitude: number; longitude: number } | null;
+  eligibilityConfirmed: boolean;
   ready: boolean;
   photos: {
     storage: string | null;
@@ -23,10 +61,36 @@ export interface SilageData {
     sample: string | null;
     texture: string | null;
   };
-  pH: string;
-  smell: string;
-  mold: string;
+  pH: "<4.2" | "4.2-4.8" | ">4.8" | "";
+  smell: "Pleasant" | "Neutral" | "Foul" | "";
+  moisture: "Dry" | "Optimal" | "Wet" | "";
+  mold: "None" | "Surface" | "Deep" | "";
+  temperature: "Cool" | "Warm" | "Hot" | "";
+  cropType: string;
+  storageType: "Pit" | "Bag" | "Bunker" | "";
+  age: "30-45" | "45-60" | "60+" | "";
+  recentWeather: "Dry" | "Mixed" | "Wet" | "";
+  feedingStatus: "Just Opened" | "Mid-feed" | "Almost Done" | "";
+  grade: "A" | "B" | "C" | "";
+  needsReview: boolean;
   submittedAt: string;
+}
+
+export interface CutObservation {
+  harvestMethod: "Manual" | "Machine" | "";
+  cropCondition: "Green" | "Dry" | "Mixed" | "";
+  cuttingHeight: "Low" | "Medium" | "High" | "";
+  lodging: "None" | "Some" | "Heavy" | "";
+  capturedBy: string;
+  savedAt: string;
+}
+
+export interface ChoppedObservation {
+  chopLength: "Fine" | "Medium" | "Coarse" | "";
+  uniformity: "Uniform" | "Mixed" | "Uneven" | "";
+  materialQuality: "Good" | "Fair" | "Poor" | "";
+  capturedBy: string;
+  savedAt: string;
 }
 
 export type Irrigation = "Rainfed" | "Irrigated" | "Mixed" | "";
@@ -50,6 +114,21 @@ export interface FieldGPS {
   capturedAt: string;
 }
 
+export interface StandingCapture {
+  plantUri: string | null;
+  leafCobUri: string | null;
+  capturedAt: string;
+  capturedBy: string;
+}
+
+export interface ZonesCapture {
+  A: ZoneData;
+  B: ZoneData;
+  C: ZoneData;
+  capturedBy: string;
+  capturedAt: string;
+}
+
 export interface Field {
   id: string;
   numericId: number;
@@ -62,20 +141,21 @@ export interface Field {
   area: string;
   gps: FieldGPS | null;
   createdAt: string;
+  createdBy: string;
   status: FieldStatus;
-  standing: {
-    plantUri: string | null;
-    leafCobUri: string | null;
-    capturedAt: string;
-  };
+  standing: StandingCapture;
+  zones?: ZonesCapture;
   cut: FieldCapture | null;
+  cutData: CutObservation | null;
   chopped: FieldCapture | null;
+  choppedData: ChoppedObservation | null;
+  fieldVisit: FieldVisit | null;
   silage: SilageData | null;
 }
 
 const KEYS = {
   FARMER: "@vitainspire/farmer_v2",
-  FIELDS: "@vitainspire/fields_v2",
+  FIELDS: "@vitainspire/fields_v5",
   ONBOARDED: "@vitainspire/onboarded_v2",
 };
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -6,694 +6,587 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
+  Modal,
   Platform,
 } from "react-native";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import Animated, { FadeIn } from "react-native-reanimated";
+import Animated, {
+  FadeInDown,
+  SlideInRight,
+  SlideInLeft,
+  SlideOutLeft,
+  SlideOutRight,
+} from "react-native-reanimated";
 
 import { Button } from "@/components/Button";
-import { CapturePhotoCard } from "@/components/CapturePhotoCard";
 import { LocationPicker } from "@/components/LocationPicker";
 import { useColors } from "@/hooks/useColors";
 import { useStore, type Irrigation } from "@/hooks/useStore";
 import { usePreciseLocation, formatLatLon } from "@/hooks/usePreciseLocation";
 import { makeFieldId } from "@/utils/idGenerator";
+import { syncFieldToSheet } from "@/utils/sheetSync";
 import { INDIA_STATES, findState, findDistrict } from "@/data/indiaLocations";
 
 const CROPS = ["Maize", "Sorghum", "Bajra", "Wheat", "Rice", "Other"];
 const IRRIGATION_OPTIONS: Irrigation[] = ["Rainfed", "Irrigated", "Mixed"];
 
-function daysBetween(fromIso: string): number | null {
-  const d = new Date(fromIso);
-  if (isNaN(d.getTime())) return null;
-  const ms = Date.now() - d.getTime();
-  return Math.max(0, Math.floor(ms / (1000 * 60 * 60 * 24)));
+const STEPS = [
+  { question: "Where is\nthis field?",      optional: false },
+  { question: "What crop\nis growing here?", optional: false },
+  { question: "How big is\nthe field?",      optional: true  },
+  { question: "When was\nit sown?",          optional: true  },
+  { question: "Any other\nfield details?",   optional: true  },
+];
+
+function toDateString(d: Date) {
+  return d.toISOString().split("T")[0];
+}
+
+function formatDisplay(iso: string) {
+  if (!iso) return null;
+  const [y, m, day] = iso.split("-");
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${day} ${months[parseInt(m) - 1]} ${y}`;
 }
 
 export default function NewFieldScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { addField, getNextNumericId, refresh } = useStore();
-  const { gps, status: gpsStatus, error: gpsError, start: startGps } = usePreciseLocation();
+  const { addField, getNextNumericId, farmer } = useStore();
+  const { gps, status: gpsStatus, start: startGps } = usePreciseLocation();
 
-  // Default to Andhra Pradesh / Kurnool (which exists in the new dataset)
   const [stateCode, setStateCode] = useState("AP");
   const [districtCode, setDistrictCode] = useState(() => {
     const ap = findState("AP");
-    const knl = ap?.districts.find((d) => d.name === "Kurnool");
-    return knl?.code ?? ap?.districts[0]?.code ?? "ATP";
+    return ap?.districts.find((d) => d.name === "Kurnool")?.code ?? ap?.districts[0]?.code ?? "ATP";
   });
-  const [crop, setCrop] = useState("Maize");
+  const [crop, setCrop] = useState("");
   const [area, setArea] = useState("");
-  const [plantUri, setPlantUri] = useState<string | null>(null);
-  const [leafCobUri, setLeafCobUri] = useState<string | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [savedField, setSavedField] = useState<{ id: string } | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  // Crop details
-  const [variety, setVariety] = useState("");
   const [sowingDate, setSowingDate] = useState("");
   const [expectedHarvest, setExpectedHarvest] = useState("");
   const [irrigation, setIrrigation] = useState<Irrigation>("");
   const [plantHeight, setPlantHeight] = useState("");
   const [rowSpacing, setRowSpacing] = useState("");
   const [plantSpacing, setPlantSpacing] = useState("");
-  const [notes, setNotes] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const sowingDays = sowingDate ? daysBetween(sowingDate) : null;
+  // Date picker state
+  const [datePicking, setDatePicking] = useState<"sowing" | "harvest" | null>(null);
+  const [tempDate, setTempDate] = useState(new Date());
 
-  // Refresh from storage when this screen mounts (for area returned from walker)
-  useFocusEffect(
-    React.useCallback(() => {
-      refresh();
-    }, [refresh])
-  );
+  const [step, setStep] = useState(0);
+  const directionRef = useRef<"fwd" | "bk">("fwd");
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Kick off GPS on mount
-  useEffect(() => {
-    startGps();
-  }, [startGps]);
+  useEffect(() => { startGps(); }, [startGps]);
 
   const stateObj = findState(stateCode) ?? INDIA_STATES[0];
-  const districtObj =
-    findDistrict(stateCode, districtCode) ?? stateObj.districts[0];
+  const districtObj = findDistrict(stateCode, districtCode) ?? stateObj.districts[0];
 
-  const canSave = !!plantUri && !!crop;
+  const topPad = Platform.OS === "web" ? Math.max(insets.top, 12) : insets.top;
+  const isFirstStep = step === 0;
+  const isLastStep = step === STEPS.length - 1;
+
+  const advance = () => {
+    directionRef.current = "fwd";
+    setStep((s) => s + 1);
+  };
+
+  const goNext = () => {
+    directionRef.current = "fwd";
+    if (isLastStep) { save(); return; }
+    setStep((s) => s + 1);
+  };
+
+  const goBack = () => {
+    if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    if (isFirstStep) { router.back(); return; }
+    directionRef.current = "bk";
+    setStep((s) => s - 1);
+  };
+
+  const scheduleAdvance = () => {
+    if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    advanceTimer.current = setTimeout(() => advance(), 350);
+  };
+
+  const openDatePicker = (field: "sowing" | "harvest") => {
+    const existing = field === "sowing" ? sowingDate : expectedHarvest;
+    setTempDate(existing ? new Date(existing) : new Date());
+    setDatePicking(field);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const confirmDate = () => {
+    if (datePicking === "sowing") setSowingDate(toDateString(tempDate));
+    else if (datePicking === "harvest") setExpectedHarvest(toDateString(tempDate));
+    setDatePicking(null);
+  };
 
   const save = async () => {
-    if (!plantUri) return;
+    if (!crop) return;
     setSaving(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const numericId = getNextNumericId();
     const id = makeFieldId(stateCode, districtObj.code, numericId);
-    await addField({
-      id,
-      numericId,
-      state: stateCode,
-      stateName: stateObj.name,
-      district: districtObj.code,
-      districtName: districtObj.name,
+    const now = new Date().toISOString();
+    const newField = {
+      id, numericId,
+      state: stateCode, stateName: stateObj.name,
+      district: districtObj.code, districtName: districtObj.name,
       cropType: crop,
       cropDetails: {
-        variety: variety.trim(),
-        sowingDate,
-        expectedHarvestDate: expectedHarvest,
-        irrigation,
-        plantHeightCm: plantHeight.trim(),
-        rowSpacingCm: rowSpacing.trim(),
-        plantSpacingCm: plantSpacing.trim(),
-        notes: notes.trim(),
+        variety: "", sowingDate, expectedHarvestDate: expectedHarvest,
+        irrigation, plantHeightCm: plantHeight, rowSpacingCm: rowSpacing,
+        plantSpacingCm: plantSpacing, notes: "",
       },
       area,
-      gps: gps
-        ? {
-            latitude: gps.latitude,
-            longitude: gps.longitude,
-            accuracy: gps.accuracy,
-            altitude: gps.altitude,
-            capturedAt: gps.capturedAt,
-          }
-        : null,
-      createdAt: new Date().toISOString(),
-      status: "standing",
-      standing: {
-        plantUri,
-        leafCobUri,
-        capturedAt: new Date().toISOString(),
-      },
-      cut: null,
-      chopped: null,
-      silage: null,
-    });
-    setSavedField({ id });
+      gps: gps ? { latitude: gps.latitude, longitude: gps.longitude, accuracy: gps.accuracy, altitude: gps.altitude, capturedAt: gps.capturedAt } : null,
+      createdAt: now,
+      createdBy: farmer?.name ?? "Unknown",
+      status: "standing" as const,
+      standing: { plantUri: null, leafCobUri: null, capturedAt: now, capturedBy: farmer?.name ?? "Unknown" },
+      cut: null, cutData: null, chopped: null, choppedData: null,
+      fieldVisit: null, silage: null,
+    };
+    await addField(newField);
+    syncFieldToSheet(newField);
+    router.replace(`/field/zone-sampling?fieldId=${id}`);
   };
 
-  const topPad = Platform.OS === "web" ? Math.max(insets.top, 12) : insets.top;
-  const bottomPad = Platform.OS === "web" ? 30 : insets.bottom + 16;
+  const renderInputs = () => {
+    switch (step) {
+      case 0:
+        return (
+          <View style={{ gap: 12 }}>
+            <TouchableOpacity
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPickerOpen(true); }}
+              activeOpacity={0.85}
+              style={[styles.inputCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}
+            >
+              <View style={[styles.inputIcon, { backgroundColor: colors.secondary }]}>
+                <MaterialCommunityIcons name="map-marker" size={20} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.inputTitle, { color: colors.foreground }]}>{stateObj.name} · {districtObj.name}</Text>
+                <Text style={[styles.inputSub, { color: colors.mutedForeground }]}>Tap to change state or district</Text>
+              </View>
+              <Feather name="chevron-down" size={18} color={colors.mutedForeground} />
+            </TouchableOpacity>
 
-  // Result screen
-  if (savedField) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={[styles.header, { paddingTop: topPad + 8, borderBottomColor: colors.border }]}>
-          <View style={[styles.iconBtn, { opacity: 0 }]} />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.headerTitle, { color: colors.foreground, textAlign: "center" }]}>
-              Field Created
-            </Text>
-          </View>
-          <View style={[styles.iconBtn, { opacity: 0 }]} />
-        </View>
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: bottomPad + 20 }}>
-          <Animated.View
-            entering={FadeIn.duration(400)}
-            style={[
-              styles.successCard,
-              { backgroundColor: colors.primary, borderRadius: colors.radius },
-            ]}
-          >
-            <View style={styles.successIcon}>
-              <Feather name="check" size={36} color={colors.primary} />
+            <View style={[styles.inputCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+              <View style={[styles.inputIcon, { backgroundColor: colors.secondary }]}>
+                <MaterialCommunityIcons name="crosshairs-gps" size={20} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.inputTitle, { color: colors.foreground }]}>
+                  {gps ? formatLatLon(gps) : gpsStatus === "requesting" ? "Locating…" : "GPS unavailable"}
+                </Text>
+                {gps && (
+                  <Text style={[styles.inputSub, { color: colors.mutedForeground }]}>
+                    ±{Math.round(gps.accuracy ?? 0)} m{gps.altitude != null ? ` · alt ${Math.round(gps.altitude)} m` : ""}
+                  </Text>
+                )}
+              </View>
+              <TouchableOpacity onPress={startGps} style={[styles.refreshBtn, { backgroundColor: colors.secondary }]} activeOpacity={0.7}>
+                <Feather name="refresh-cw" size={15} color={colors.primary} />
+              </TouchableOpacity>
             </View>
-            <Text style={[styles.successLabel, { color: colors.primaryForeground, opacity: 0.85 }]}>
-              FIELD ID
-            </Text>
-            <Text style={[styles.successId, { color: colors.primaryForeground }]}>
-              {savedField.id}
-            </Text>
-            <Text style={[styles.successSub, { color: colors.primaryForeground, opacity: 0.85 }]}>
-              {crop} · {area || "—"} acres
-            </Text>
-            <Text style={[styles.successSub, { color: colors.primaryForeground, opacity: 0.75, marginTop: 2 }]}>
-              {stateObj.name} · {districtObj.name}
-            </Text>
-            {gps && (
-              <Text style={[styles.successSub, { color: colors.primaryForeground, opacity: 0.75, marginTop: 2 }]}>
-                {formatLatLon(gps)}
-              </Text>
-            )}
-          </Animated.View>
-
-          <Text style={[styles.sectionTitle, { color: colors.foreground, marginTop: 28 }]}>
-            Status
-          </Text>
-          <View style={{ gap: 8 }}>
-            <StatusRow label="Standing" done colors={colors} />
-            <StatusRow label="Cut" colors={colors} />
-            <StatusRow label="Chopped" colors={colors} />
-            <StatusRow label="Silage" colors={colors} />
           </View>
+        );
 
-          <Button
-            title="Back to Field Capture"
-            onPress={() => router.replace("/(tabs)")}
-            style={{ marginTop: 32 }}
-            icon={<Feather name="arrow-left" size={18} color={colors.primaryForeground} />}
-          />
-        </ScrollView>
-      </View>
-    );
-  }
-
-  return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={[styles.header, { paddingTop: topPad + 8, borderBottomColor: colors.border }]}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={[styles.iconBtn, { backgroundColor: colors.secondary }]}
-          activeOpacity={0.7}
-        >
-          <Feather name="x" size={20} color={colors.foreground} />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.headerTitle, { color: colors.foreground }]}>New Field</Text>
-          <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>
-            Step 1 · Standing crop
-          </Text>
-        </View>
-      </View>
-
-      <ScrollView
-        contentContainerStyle={{ padding: 16, paddingBottom: bottomPad + 16 }}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text style={[styles.label, { color: colors.foreground }]}>Location</Text>
-        <TouchableOpacity
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            setPickerOpen(true);
-          }}
-          activeOpacity={0.85}
-          style={[
-            styles.locationBtn,
-            { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius },
-          ]}
-        >
-          <View style={[styles.iconCircle, { backgroundColor: colors.secondary }]}>
-            <MaterialCommunityIcons name="map-marker" size={20} color={colors.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.locName, { color: colors.foreground }]} numberOfLines={1}>
-              {stateObj.name} · {districtObj.name}
-            </Text>
-            <Text style={[styles.locId, { color: colors.mutedForeground }]}>
-              ID prefix: {stateCode}-{districtObj.code}
-            </Text>
-          </View>
-          <Feather name="chevron-down" size={18} color={colors.foreground} />
-        </TouchableOpacity>
-
-        {/* Precise GPS card */}
-        <View
-          style={[
-            styles.gpsCard,
-            { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius },
-          ]}
-        >
-          <View style={[styles.iconCircle, { backgroundColor: colors.secondary }]}>
-            <MaterialCommunityIcons name="crosshairs-gps" size={20} color={colors.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            {gps ? (
-              <>
-                <Text style={[styles.locName, { color: colors.foreground }]} numberOfLines={1}>
-                  {formatLatLon(gps)}
-                </Text>
-                <Text style={[styles.locId, { color: colors.mutedForeground }]}>
-                  Accuracy ±{gps.accuracy != null ? Math.round(gps.accuracy) : "?"} m
-                  {gps.altitude != null ? ` · alt ${Math.round(gps.altitude)} m` : ""}
-                </Text>
-              </>
-            ) : gpsStatus === "requesting" ? (
-              <>
-                <Text style={[styles.locName, { color: colors.foreground }]}>Locating…</Text>
-                <Text style={[styles.locId, { color: colors.mutedForeground }]}>
-                  Waiting for GPS fix
-                </Text>
-              </>
-            ) : gpsStatus === "denied" ? (
-              <>
-                <Text style={[styles.locName, { color: colors.foreground }]}>
-                  Permission needed
-                </Text>
-                <Text style={[styles.locId, { color: colors.mutedForeground }]}>
-                  Tap retry and allow access
-                </Text>
-              </>
-            ) : (
-              <>
-                <Text style={[styles.locName, { color: colors.foreground }]}>
-                  GPS not available
-                </Text>
-                <Text style={[styles.locId, { color: colors.mutedForeground }]}>
-                  {gpsError ?? "Tap retry to try again"}
-                </Text>
-              </>
-            )}
-          </View>
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              startGps();
-            }}
-            style={[styles.refreshBtn, { backgroundColor: colors.secondary }]}
-            activeOpacity={0.7}
-          >
-            <Feather
-              name="refresh-cw"
-              size={16}
-              color={colors.primary}
-            />
-          </TouchableOpacity>
-        </View>
-
-        <Text style={[styles.label, { color: colors.foreground, marginTop: 22 }]}>Crop</Text>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-          {CROPS.map((c) => {
-            const sel = c === crop;
-            return (
-              <TouchableOpacity
+      case 1:
+        return (
+          <View style={styles.pillWrap}>
+            {CROPS.map((c) => (
+              <Pill
                 key={c}
+                label={c}
+                selected={crop === c}
                 onPress={() => {
                   Haptics.selectionAsync();
                   setCrop(c);
+                  scheduleAdvance();
                 }}
-                activeOpacity={0.85}
-                style={{
-                  paddingHorizontal: 14,
-                  paddingVertical: 10,
-                  borderRadius: 999,
-                  borderWidth: 2,
-                  borderColor: sel ? colors.primary : colors.border,
-                  backgroundColor: sel ? colors.primary : colors.card,
-                }}
-              >
-                <Text
-                  style={{
-                    color: sel ? colors.primaryForeground : colors.foreground,
-                    fontWeight: "700",
-                    fontSize: 13,
-                  }}
-                >
-                  {c}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+                colors={colors}
+                large
+              />
+            ))}
+          </View>
+        );
 
-        {/* CROP DETAILS */}
-        <Text style={[styles.label, { color: colors.foreground, marginTop: 22 }]}>
-          Variety / Hybrid — optional
-        </Text>
-        <TextInput
-          value={variety}
-          onChangeText={setVariety}
-          placeholder="e.g. DKC 9144, Pioneer 30V92"
-          placeholderTextColor={colors.mutedForeground}
-          style={[
-            styles.input,
-            {
-              color: colors.foreground,
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-              borderRadius: colors.radius,
-            },
-          ]}
-        />
+      case 2:
+        return (
+          <View style={{ gap: 12 }}>
+            <View style={[styles.inputCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+              <View style={[styles.inputIcon, { backgroundColor: colors.secondary }]}>
+                <Feather name="edit-2" size={16} color={colors.primary} />
+              </View>
+              <TextInput
+                value={area}
+                onChangeText={setArea}
+                placeholder="e.g. 2.5 acres"
+                placeholderTextColor={colors.mutedForeground}
+                keyboardType="decimal-pad"
+                style={[styles.areaInput, { color: colors.foreground }]}
+              />
+            </View>
+            <TouchableOpacity
+              onPress={() => router.push("/field/walker")}
+              activeOpacity={0.85}
+              style={[styles.inputCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}
+            >
+              <View style={[styles.inputIcon, { backgroundColor: colors.secondary }]}>
+                <MaterialCommunityIcons name="walk" size={18} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.inputTitle, { color: colors.foreground }]}>Walk the perimeter</Text>
+                <Text style={[styles.inputSub, { color: colors.mutedForeground }]}>Calculates area automatically</Text>
+              </View>
+              <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+        );
 
-        <View style={{ flexDirection: "row", gap: 10, marginTop: 18 }}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.label, { color: colors.foreground }]}>Sowing date</Text>
+      case 3:
+        return (
+          <View style={{ gap: 14 }}>
             <DateField
+              label="Sowing date"
               value={sowingDate}
-              onChange={setSowingDate}
+              onPress={() => openDatePicker("sowing")}
               colors={colors}
             />
-            {sowingDays !== null && (
-              <Text style={[styles.helpText, { color: colors.mutedForeground }]}>
-                {sowingDays} day{sowingDays === 1 ? "" : "s"} after sowing
-              </Text>
-            )}
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.label, { color: colors.foreground }]}>Expected harvest</Text>
             <DateField
+              label="Expected harvest"
               value={expectedHarvest}
-              onChange={setExpectedHarvest}
+              onPress={() => openDatePicker("harvest")}
               colors={colors}
             />
           </View>
+        );
+
+      case 4:
+        return (
+          <View style={{ gap: 16 }}>
+            <View>
+              <Text style={[styles.miniLabel, { color: colors.mutedForeground }]}>Irrigation</Text>
+              <View style={styles.pillWrap}>
+                {IRRIGATION_OPTIONS.map((o) => (
+                  <Pill
+                    key={o}
+                    label={o}
+                    selected={irrigation === o}
+                    onPress={() => { Haptics.selectionAsync(); setIrrigation(irrigation === o ? "" : o); }}
+                    colors={colors}
+                  />
+                ))}
+              </View>
+            </View>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <MiniField label="Plant ht (cm)" value={plantHeight} onChange={setPlantHeight} placeholder="220" numeric colors={colors} />
+              <MiniField label="Row sp (cm)" value={rowSpacing} onChange={setRowSpacing} placeholder="60" numeric colors={colors} />
+              <MiniField label="Plant sp (cm)" value={plantSpacing} onChange={setPlantSpacing} placeholder="20" numeric colors={colors} />
+            </View>
+          </View>
+        );
+    }
+  };
+
+  const isFwd = directionRef.current === "fwd";
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: topPad + 8, borderBottomColor: colors.border }]}>
+        <TouchableOpacity onPress={goBack} style={[styles.iconBtn, { backgroundColor: colors.secondary }]} activeOpacity={0.7}>
+          <Feather name={isFirstStep ? "x" : "arrow-left"} size={20} color={colors.foreground} />
+        </TouchableOpacity>
+        <View style={[styles.progressTrack, { backgroundColor: colors.secondary }]}>
+          <View style={[styles.progressFill, { backgroundColor: colors.primary, width: `${((step + 1) / STEPS.length) * 100}%` as any }]} />
         </View>
+        <Text style={[styles.stepCount, { color: colors.mutedForeground }]}>{step + 1} / {STEPS.length}</Text>
+      </View>
 
-        <Text style={[styles.label, { color: colors.foreground, marginTop: 18 }]}>Irrigation</Text>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-          {IRRIGATION_OPTIONS.map((o) => {
-            const sel = irrigation === o;
-            return (
-              <TouchableOpacity
-                key={o}
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setIrrigation(sel ? "" : o);
-                }}
-                activeOpacity={0.85}
-                style={{
-                  paddingHorizontal: 14,
-                  paddingVertical: 10,
-                  borderRadius: 999,
-                  borderWidth: 2,
-                  borderColor: sel ? colors.primary : colors.border,
-                  backgroundColor: sel ? colors.primary : colors.card,
-                }}
-              >
-                <Text
-                  style={{
-                    color: sel ? colors.primaryForeground : colors.foreground,
-                    fontWeight: "700",
-                    fontSize: 13,
-                  }}
-                >
-                  {o}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        <View style={{ flexDirection: "row", gap: 10, marginTop: 18 }}>
-          <SmallNumberField
-            label="Plant height (cm)"
-            value={plantHeight}
-            onChange={setPlantHeight}
-            placeholder="e.g. 220"
-            colors={colors}
-          />
-          <SmallNumberField
-            label="Row spacing (cm)"
-            value={rowSpacing}
-            onChange={setRowSpacing}
-            placeholder="e.g. 60"
-            colors={colors}
-          />
-          <SmallNumberField
-            label="Plant spacing (cm)"
-            value={plantSpacing}
-            onChange={setPlantSpacing}
-            placeholder="e.g. 20"
-            colors={colors}
-          />
-        </View>
-
-        <Text style={[styles.label, { color: colors.foreground, marginTop: 18 }]}>
-          Notes — optional
-        </Text>
-        <TextInput
-          value={notes}
-          onChangeText={setNotes}
-          placeholder="Pests, fertilizer, weather, soil…"
-          placeholderTextColor={colors.mutedForeground}
-          multiline
-          numberOfLines={3}
-          style={[
-            styles.input,
-            {
-              color: colors.foreground,
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-              borderRadius: colors.radius,
-              minHeight: 80,
-              textAlignVertical: "top",
-              paddingTop: 12,
-              fontSize: 14,
-              fontWeight: "500",
-            },
-          ]}
-        />
-
-        <Text style={[styles.label, { color: colors.foreground, marginTop: 22 }]}>
-          Field area (acres) — optional
-        </Text>
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <TextInput
-            value={area}
-            onChangeText={setArea}
-            placeholder="e.g. 2.5"
-            placeholderTextColor={colors.mutedForeground}
-            keyboardType="decimal-pad"
-            style={[
-              styles.input,
-              {
-                color: colors.foreground,
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-                borderRadius: colors.radius,
-                flex: 1,
-              },
-            ]}
-          />
-          <TouchableOpacity
-            onPress={() => router.push("/field/walker")}
-            activeOpacity={0.85}
-            style={[
-              styles.walkBtn,
-              { backgroundColor: colors.secondary, borderColor: colors.primary, borderRadius: colors.radius },
-            ]}
+      {/* Sliding step content */}
+      <View style={{ flex: 1, overflow: "hidden" }}>
+        <Animated.View
+          key={step}
+          entering={isFwd ? SlideInRight.duration(340) : SlideInLeft.duration(340)}
+          exiting={isFwd ? SlideOutLeft.duration(340) : SlideOutRight.duration(340)}
+          style={{ flex: 1 }}
+        >
+          <ScrollView
+            contentContainerStyle={[styles.stepContent, { paddingBottom: insets.bottom + 120 }]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
           >
-            <MaterialCommunityIcons name="walk" size={20} color={colors.primary} />
-            <Text style={{ color: colors.primary, fontWeight: "700", fontSize: 13 }}>Walk</Text>
-          </TouchableOpacity>
-        </View>
+            {STEPS[step].optional && (
+              <View style={[styles.optBadge, { backgroundColor: colors.secondary }]}>
+                <Text style={[styles.optBadgeText, { color: colors.mutedForeground }]}>Optional — tap Skip to continue</Text>
+              </View>
+            )}
 
-        <View style={{ marginTop: 24 }}>
-          <CapturePhotoCard
-            label="Standing Plant"
-            hint="Wide shot of the standing crop"
-            uri={plantUri}
-            onChange={setPlantUri}
-            height={200}
+            <Text style={[styles.question, { color: colors.foreground }]}>
+              {STEPS[step].question}
+            </Text>
+
+            <Animated.View entering={FadeInDown.delay(60).duration(320)} style={{ marginTop: 36 }}>
+              {renderInputs()}
+            </Animated.View>
+          </ScrollView>
+        </Animated.View>
+      </View>
+
+      {/* Bottom bar */}
+      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12, borderTopColor: colors.border, backgroundColor: colors.background }]}>
+        {isLastStep ? (
+          <Button
+            title="Save & Start Zone Sampling"
+            onPress={save}
+            disabled={!crop || saving}
+            loading={saving}
+            icon={<Feather name="arrow-right" size={20} color={colors.primaryForeground} />}
           />
-          <CapturePhotoCard
-            label="Leaf / Cob"
-            hint="Close-up to assess crop quality"
-            uri={leafCobUri}
-            onChange={setLeafCobUri}
-            optional
-            height={170}
-          />
-        </View>
+        ) : (
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            {STEPS[step].optional && (
+              <TouchableOpacity
+                onPress={goNext}
+                activeOpacity={0.7}
+                style={[styles.skipBtn, { backgroundColor: colors.secondary, borderRadius: colors.radius }]}
+              >
+                <Text style={[styles.skipText, { color: colors.mutedForeground }]}>Skip</Text>
+              </TouchableOpacity>
+            )}
+            <Button
+              title="Next"
+              onPress={goNext}
+              disabled={step === 1 && !crop}
+              icon={<Feather name="arrow-right" size={18} color={colors.primaryForeground} />}
+              style={{ flex: 1 }}
+            />
+          </View>
+        )}
+      </View>
 
-        <Button
-          title="Save Field"
-          onPress={save}
-          disabled={!canSave || saving}
-          loading={saving}
-          icon={<Feather name="save" size={20} color={colors.primaryForeground} />}
-          style={{ marginTop: 20 }}
-        />
-      </ScrollView>
-
+      {/* Location picker modal */}
       <LocationPicker
         visible={pickerOpen}
         onClose={() => setPickerOpen(false)}
         selectedState={stateCode}
         selectedDistrict={districtCode}
-        onSelect={(s, d) => {
-          setStateCode(s.code);
-          setDistrictCode(d.code);
-        }}
+        onSelect={(s, d) => { setStateCode(s.code); setDistrictCode(d.code); }}
       />
+
+      {/* Date picker modal */}
+      {datePicking !== null && (
+        <DatePickerModal
+          date={tempDate}
+          colors={colors}
+          insets={insets}
+          label={datePicking === "sowing" ? "Sowing Date" : "Expected Harvest"}
+          onChange={(d) => setTempDate(d)}
+          onConfirm={confirmDate}
+          onCancel={() => setDatePicking(null)}
+        />
+      )}
     </View>
   );
 }
 
-function DateField({
-  value,
-  onChange,
-  colors,
+// ── Date picker modal ─────────────────────────────────────────────────────────
+
+function DatePickerModal({
+  date, colors, insets, label, onChange, onConfirm, onCancel,
 }: {
-  value: string;
-  onChange: (v: string) => void;
-  colors: any;
+  date: Date; colors: any; insets: any; label: string;
+  onChange: (d: Date) => void; onConfirm: () => void; onCancel: () => void;
 }) {
-  // On web, render a native date input for a real picker; on native, plain text input.
-  if (Platform.OS === "web") {
-    return (
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      React.createElement("input" as any, {
-        type: "date",
-        value,
-        onChange: (e: any) => onChange(e.target.value),
-        style: {
-          borderWidth: 1,
-          borderStyle: "solid",
-          borderColor: colors.border,
-          backgroundColor: colors.card,
-          color: colors.foreground,
-          borderRadius: colors.radius,
-          paddingTop: 12,
-          paddingBottom: 12,
-          paddingLeft: 14,
-          paddingRight: 14,
-          fontSize: 15,
-          fontWeight: 700,
-          fontFamily: "inherit",
-          width: "100%",
-          boxSizing: "border-box",
-          outline: "none",
-        },
-      })
-    );
-  }
+  const [viewYear, setViewYear] = useState(date.getFullYear());
+  const [viewMonth, setViewMonth] = useState(date.getMonth());
+
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const DAY_LABELS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+
+  const prevMonth = () => {
+    if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); }
+    else setViewMonth(m => m - 1);
+  };
+  const nextMonth = () => {
+    if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); }
+    else setViewMonth(m => m + 1);
+  };
+
+  const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const today = new Date();
+
+  const cells: (number | null)[] = [
+    ...Array(firstDay).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  // pad to full rows
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const selectDay = (day: number) => {
+    const picked = new Date(viewYear, viewMonth, day);
+    onChange(picked);
+    Haptics.selectionAsync();
+  };
+
+  const isSelected = (day: number) =>
+    date.getFullYear() === viewYear && date.getMonth() === viewMonth && date.getDate() === day;
+
+  const isToday = (day: number) =>
+    today.getFullYear() === viewYear && today.getMonth() === viewMonth && today.getDate() === day;
+
   return (
-    <TextInput
-      value={value}
-      onChangeText={onChange}
-      placeholder="YYYY-MM-DD"
-      placeholderTextColor={colors.mutedForeground}
-      style={[
-        styles.input,
-        {
-          color: colors.foreground,
-          backgroundColor: colors.card,
-          borderColor: colors.border,
-          borderRadius: colors.radius,
-          fontSize: 15,
-        },
-      ]}
-    />
+    <Modal transparent animationType="fade" visible onRequestClose={onCancel}>
+      <View style={styles.modalOverlay}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onCancel} activeOpacity={1} />
+        <View style={[styles.modalSheet, { backgroundColor: colors.card }]}>
+
+          {/* Header */}
+          <View style={styles.modalHeader}>
+            <Text style={{ fontSize: 13, fontWeight: "800", color: colors.foreground }}>{label}</Text>
+            <TouchableOpacity onPress={onCancel} activeOpacity={0.7} style={[styles.calCloseBtn, { backgroundColor: colors.secondary }]}>
+              <Feather name="x" size={14} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Month nav */}
+          <View style={styles.calMonthRow}>
+            <TouchableOpacity onPress={prevMonth} style={[styles.calNavBtn, { backgroundColor: colors.secondary }]} activeOpacity={0.7}>
+              <Feather name="chevron-left" size={15} color={colors.foreground} />
+            </TouchableOpacity>
+            <Text style={[styles.calMonthLabel, { color: colors.foreground }]}>
+              {MONTHS[viewMonth].slice(0, 3)} {viewYear}
+            </Text>
+            <TouchableOpacity onPress={nextMonth} style={[styles.calNavBtn, { backgroundColor: colors.secondary }]} activeOpacity={0.7}>
+              <Feather name="chevron-right" size={15} color={colors.foreground} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Day labels */}
+          <View style={styles.calDayLabels}>
+            {DAY_LABELS.map(d => (
+              <Text key={d} style={[styles.calDayLabel, { color: colors.mutedForeground }]}>{d}</Text>
+            ))}
+          </View>
+
+          {/* Day grid */}
+          <View style={styles.calGrid}>
+            {cells.map((day, i) => {
+              if (!day) return <View key={`e${i}`} style={styles.calCell} />;
+              const sel = isSelected(day);
+              const tod = isToday(day);
+              return (
+                <TouchableOpacity
+                  key={`d${day}`}
+                  onPress={() => { selectDay(day); setTimeout(onConfirm, 120); }}
+                  activeOpacity={0.75}
+                  style={[
+                    styles.calCell,
+                    sel && { backgroundColor: colors.primary, borderRadius: 999 },
+                    !sel && tod && { borderWidth: 1.5, borderColor: colors.primary, borderRadius: 999 },
+                  ]}
+                >
+                  <Text style={{
+                    fontSize: 12, fontWeight: sel ? "800" : "500",
+                    color: sel ? colors.primaryForeground : tod ? colors.primary : colors.foreground,
+                  }}>
+                    {day}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
-function SmallNumberField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  colors,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  colors: any;
+// ── DateField ─────────────────────────────────────────────────────────────────
+
+function DateField({ label, value, onPress, colors }: {
+  label: string; value: string; onPress: () => void; colors: any;
+}) {
+  const display = formatDisplay(value);
+  return (
+    <View>
+      <Text style={[styles.miniLabel, { color: colors.mutedForeground }]}>{label}</Text>
+      <TouchableOpacity
+        onPress={onPress}
+        activeOpacity={0.85}
+        style={[styles.dateField, {
+          backgroundColor: colors.card,
+          borderColor: value ? colors.primary : colors.border,
+          borderRadius: colors.radius,
+        }]}
+      >
+        <Feather name="calendar" size={18} color={value ? colors.primary : colors.mutedForeground} />
+        <Text style={[styles.dateFieldText, { color: value ? colors.foreground : colors.mutedForeground }]}>
+          {display ?? "Tap to select date"}
+        </Text>
+        {value && <Feather name="check-circle" size={16} color={colors.primary} />}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ── Pill ──────────────────────────────────────────────────────────────────────
+
+function Pill({ label, selected, onPress, colors, large }: {
+  label: string; selected: boolean; onPress: () => void; colors: any; large?: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.85}
+      style={{
+        paddingHorizontal: large ? 20 : 16,
+        paddingVertical: large ? 13 : 10,
+        borderRadius: 999,
+        borderWidth: 2,
+        borderColor: selected ? colors.primary : colors.border,
+        backgroundColor: selected ? colors.primary : colors.card,
+      }}
+    >
+      <Text style={{ color: selected ? colors.primaryForeground : colors.foreground, fontWeight: "700", fontSize: large ? 15 : 13 }}>
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+// ── MiniField ─────────────────────────────────────────────────────────────────
+
+function MiniField({ label, value, onChange, placeholder, numeric, colors }: {
+  label: string; value: string; onChange: (v: string) => void; placeholder: string; numeric?: boolean; colors: any;
 }) {
   return (
     <View style={{ flex: 1 }}>
-      <Text style={[styles.label, { color: colors.foreground }]}>{label}</Text>
+      <Text style={[styles.miniLabel, { color: colors.mutedForeground }]}>{label}</Text>
       <TextInput
         value={value}
         onChangeText={onChange}
         placeholder={placeholder}
         placeholderTextColor={colors.mutedForeground}
-        keyboardType="decimal-pad"
-        style={[
-          styles.input,
-          {
-            color: colors.foreground,
-            backgroundColor: colors.card,
-            borderColor: colors.border,
-            borderRadius: colors.radius,
-            fontSize: 15,
-          },
-        ]}
+        keyboardType={numeric ? "decimal-pad" : "default"}
+        style={[styles.miniInput, { color: colors.foreground, backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}
       />
     </View>
   );
 }
 
-function StatusRow({
-  label,
-  done,
-  colors,
-}: {
-  label: string;
-  done?: boolean;
-  colors: any;
-}) {
-  return (
-    <View
-      style={[
-        styles.statusRow,
-        {
-          backgroundColor: done ? colors.primary + "15" : colors.secondary,
-          borderRadius: colors.radius,
-        },
-      ]}
-    >
-      <View
-        style={[
-          styles.statusDot,
-          {
-            backgroundColor: done ? colors.primary : "transparent",
-            borderColor: done ? colors.primary : colors.border,
-          },
-        ]}
-      >
-        {done ? (
-          <Feather name="check" size={13} color={colors.primaryForeground} />
-        ) : (
-          <Feather name="clock" size={13} color={colors.mutedForeground} />
-        )}
-      </View>
-      <Text
-        style={{
-          fontSize: 14,
-          fontWeight: "700",
-          color: done ? colors.foreground : colors.mutedForeground,
-        }}
-      >
-        {label}
-      </Text>
-    </View>
-  );
-}
+// ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   header: {
@@ -701,104 +594,41 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
     paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingBottom: 14,
     borderBottomWidth: 1,
   },
-  iconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerTitle: { fontSize: 18, fontWeight: "800" },
-  headerSub: { fontSize: 12, fontWeight: "500", marginTop: 2 },
-  label: {
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    marginBottom: 8,
-  },
-  locationBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 14,
-    borderWidth: 1,
-  },
-  gpsCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 14,
-    borderWidth: 1,
-    marginTop: 10,
-  },
-  refreshBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  iconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  locName: { fontSize: 15, fontWeight: "700" },
-  locId: { fontSize: 12, fontWeight: "500", marginTop: 2 },
-  helpText: { fontSize: 11, fontWeight: "600", marginTop: 6 },
-  input: {
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 17,
-    fontWeight: "700",
-  },
-  walkBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderWidth: 2,
-  },
-  successCard: { padding: 30, alignItems: "center", gap: 4 },
-  successIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 14,
-  },
-  successLabel: { fontSize: 11, fontWeight: "800", letterSpacing: 1.5 },
-  successId: { fontSize: 32, fontWeight: "900", letterSpacing: 1, marginVertical: 6 },
-  successSub: { fontSize: 14, fontWeight: "600", marginTop: 4 },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 1.2,
-    marginBottom: 12,
-  },
-  statusRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 12,
-  },
-  statusDot: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1.5,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  iconBtn: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
+  progressTrack: { flex: 1, height: 4, borderRadius: 2, overflow: "hidden" },
+  progressFill: { height: "100%", borderRadius: 2 },
+  stepCount: { fontSize: 12, fontWeight: "700", minWidth: 36, textAlign: "right" },
+  stepContent: { paddingHorizontal: 24, paddingTop: 32, gap: 0 },
+  optBadge: { alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, marginBottom: 20 },
+  optBadgeText: { fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8 },
+  question: { fontSize: 36, fontWeight: "900", lineHeight: 44, letterSpacing: -1 },
+  inputCard: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderWidth: 1 },
+  inputIcon: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
+  inputTitle: { fontSize: 15, fontWeight: "700" },
+  inputSub: { fontSize: 12, fontWeight: "500", marginTop: 2 },
+  refreshBtn: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
+  pillWrap: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  areaInput: { fontSize: 16, fontWeight: "600", paddingVertical: 4, flex: 1 },
+  miniLabel: { fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 },
+  miniInput: { borderWidth: 1, paddingHorizontal: 12, paddingVertical: 12, fontSize: 15, fontWeight: "600" },
+  dateField: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderWidth: 1.5 },
+  dateFieldText: { flex: 1, fontSize: 15, fontWeight: "600" },
+  bottomBar: { paddingHorizontal: 16, paddingTop: 14, borderTopWidth: 1, gap: 8 },
+  skipBtn: { paddingHorizontal: 20, alignItems: "center", justifyContent: "center" },
+  skipText: { fontSize: 14, fontWeight: "700" },
+  modalOverlay: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.4)" },
+  modalSheet: { width: 300, borderRadius: 18, padding: 14, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 24, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
+  modalHandle: { width: 0, height: 0 },
+  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  calCloseBtn: { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  calMonthRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  calNavBtn: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  calMonthLabel: { fontSize: 13, fontWeight: "800" },
+  calDayLabels: { flexDirection: "row", marginBottom: 4 },
+  calDayLabel: { flex: 1, textAlign: "center", fontSize: 10, fontWeight: "700", textTransform: "uppercase" },
+  calGrid: { flexDirection: "row", flexWrap: "wrap" },
+  calCell: { width: "14.285714%", aspectRatio: 1, alignItems: "center", justifyContent: "center" },
 });

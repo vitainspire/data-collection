@@ -74,7 +74,7 @@ export default function OnboardingScreen() {
       photoUri,
       createdAt: new Date().toISOString(),
     });
-    router.replace("/(tabs)");
+    router.replace("/home");
   };
 
   const topPad = Platform.OS === "web" ? Math.max(insets.top, 67) : insets.top;
