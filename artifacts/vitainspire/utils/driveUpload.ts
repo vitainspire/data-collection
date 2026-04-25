@@ -7,6 +7,7 @@
  * Set EXPO_PUBLIC_GAS_BRIDGE_URL in your .env file to the deployed Web App URL.
  */
 
+import { Platform } from "react-native";
 import * as FileSystem from "expo-file-system";
 import type {
   Field,
@@ -36,17 +37,23 @@ function stamp(iso?: string): string {
   );
 }
 
-/** Convert a local URI to base64 (strips the data-URI prefix if present) */
+/** Convert a local URI to base64 (handles data:, blob:, and native file URIs) */
 async function toBase64(uri: string): Promise<string> {
   if (uri.startsWith("data:")) {
-    // Web blob URL — strip prefix
     return uri.split(",")[1];
   }
-  // Native file URI — read via expo-file-system
-  const b64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  return b64;
+  if (Platform.OS === "web" || uri.startsWith("blob:")) {
+    // Web: fetch the blob, read with FileReader
+    const blob = await fetch(uri).then((r) => r.blob());
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+  // Native file URI
+  return FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
 }
 
 // ─── Upload core ─────────────────────────────────────────────────────────────
@@ -88,8 +95,11 @@ export async function uploadPhoto(
     });
 
     const json: UploadResult = await res.json();
+    if (json.status !== "success") console.warn("[driveUpload] upload failed:", fileName, json);
+    else console.log("[driveUpload] uploaded:", json.url);
     return json;
   } catch (err: any) {
+    console.warn("[driveUpload] error:", fileName, err?.message ?? String(err));
     return { status: "error", message: err?.message ?? String(err) };
   }
 }
