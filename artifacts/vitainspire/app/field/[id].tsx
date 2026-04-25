@@ -339,6 +339,4 @@ const styles = StyleSheet.create({
   zoneLabel: { fontSize: 10, fontWeight: "700" },
   bottomBar: { paddingHorizontal: 16, paddingTop: 12, borderTopWidth: 1, gap: 10 },
   completeBanner: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, padding: 16 },
-  syncBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 10, borderWidth: 1, borderRadius: 10, borderStyle: "dashed" },
-  syncText: { fontSize: 13, fontWeight: "600" },
 });
